@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>M10 Storage - Control Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    // Konfigurasi Tailwind untuk tema gelap kustom
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            panel: '#1e293b',
+            vdark: '#0f172a',
+            accent: '#38bdf8',
+            accentHover: '#0ea5e9'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #0f172a;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* Penyelarasan SweetAlert2 agar matching dengan Tema Dark */
+    .swal2-popup {
+      background: #1e293b !important;
+      color: #f8fafc !important;
+      border-radius: 1rem !important;
+    }
+    .swal2-title, .swal2-html-container { color: #f8fafc !important; }
+  </style>
+</head>
+<body class="text-slate-200 min-h-screen flex flex-col md:flex-row antialiased">
+
+  <div id="app" class="w-full flex flex-col md:flex-row min-h-screen pb-16 md:pb-0">
+    <div class="flex flex-col items-center justify-center min-h-screen w-full gap-3 bg-vdark">
+      <div class="animate-spin rounded-full h-10 w-10 border-2 border-t-transparent border-accent"></div>
+      <p class="text-xs text-slate-500 tracking-widest uppercase">Booting System...</p>
+    </div>
+  </div>
+
+  <script type="module">
+    // CONFIG INTEGRASI SUPABASE
+    const SUPABASE_URL = "https://alajpxjlurmkudssynjk.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsYWpweGpsdXJta3Vkc3N5bmprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODE3OTMsImV4cCI6MjA5NzQ1Nzc5M30.UdzUNjfo46srbfDixmUZDjIwAF3LydirVrGfJ92uj_Y";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // SYSTEM ROUTER STATE
+    let currentUser = null;
+    let userRole = null;
+    let currentHash = window.location.hash || '#dashboard';
+
+    // INISIALISASI UTAMA
+    async function initApp() {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        currentUser = session.user;
+        const { data, error } = await supabase.from('user_roles').select('role').eq('user_id', currentUser.id).single();
+        if (!error && data) {
+          userRole = data.role;
+          router();
+        } else {
+          await supabase.auth.signOut();
+          renderLogin("Akses Ditolak: Akun belum terkonfigurasi di user_roles.");
+        }
+      } else {
+        renderLogin();
+      }
+
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          currentUser = session.user;
+          const { data } = await supabase.from('user_roles').select('role').eq('user_id', currentUser.id).single();
+          userRole = data?.role;
+          window.location.hash = '#dashboard';
+          router();
+        } else if (event === 'SIGNED_OUT') {
+          currentUser = null;
+          userRole = null;
+          window.location.hash = '';
+          renderLogin();
+        }
+      });
+    }
+
+    window.addEventListener('hashchange', () => {
+      if (!currentUser) return;
+      currentHash = window.location.hash || '#dashboard';
+      router();
+    });
+
+    function router() {
+      const appDiv = document.getElementById('app');
+      if (!currentUser) return renderLogin();
+
+      const rolesConfig = {
+        super_admin: ['#dashboard', '#barang', '#barang-masuk', '#barang-keluar', '#orders', '#history'],
+        packer: ['#dashboard', '#barang-keluar'],
+        admin_gudang: ['#dashboard', '#barang-masuk'],
+        admin_order: ['#dashboard', '#orders']
+      };
+
+      if (!rolesConfig[userRole].includes(currentHash)) {
+        currentHash = '#dashboard';
+        window.location.hash = '#dashboard';
+      }
+
+      if (!document.getElementById('main-layout')) {
+        appDiv.innerHTML = renderLayout();
+        setupLayoutListeners();
+      }
+
+      // Toggle menu aktif (Desktop & Mobile)
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        const isActive = btn.getAttribute('href') === currentHash;
+        if (isActive) {
+          btn.classList.add('bg-slate-800', 'text-accent', 'border-l-4', 'border-accent', 'md:border-l-4', 'md:border-b-0');
+          btn.classList.remove('text-slate-400');
+        } else {
+          btn.classList.remove('bg-slate-800', 'text-accent', 'border-l-4', 'border-accent');
+          btn.classList.add('text-slate-400');
+        }
+      });
+
+      const contentArea = document.getElementById('content-area');
+      if (currentHash === '#dashboard') viewDashboard(contentArea);
+      if (currentHash === '#barang') viewBarang(contentArea);
+      if (currentHash === '#barang-masuk') viewBarangMasuk(contentArea);
+      if (currentHash === '#barang-keluar') viewBarangKeluar(contentArea);
+      if (currentHash === '#orders') viewOrders(contentArea);
+      if (currentHash === '#history') viewHistoryLog(contentArea);
+    }
+
+    // ==========================================
+    // LAYOUT DARK PREMIUM COMPONENT
+    // ==========================================
+    function renderLayout() {
+      const menuItems = [
+        { hash: '#dashboard', label: 'Dashboard', icon: 'fa-chart-pie', roles: ['super_admin', 'packer', 'admin_gudang', 'admin_order'] },
+        { hash: '#barang', label: 'Master Item', icon: 'fa-box', roles: ['super_admin'] },
+        { hash: '#barang-masuk', label: 'Stock In', icon: 'fa-arrow-down-long', roles: ['super_admin', 'admin_gudang'] },
+        { hash: '#barang-keluar', label: 'Stock Out', icon: 'fa-arrow-up-long', roles: ['super_admin', 'packer'] },
+        { hash: '#orders', label: 'Procurement', icon: 'fa-file-signature', roles: ['super_admin', 'admin_order'] },
+        { hash: '#history', label: 'History Log', icon: 'fa-clock-rotate-left', roles: ['super_admin'] }
+      ];
+
+      const visibleMenus = menuItems.filter(item => item.roles.includes(userRole));
+
+      return `
+        <div id="main-layout" class="w-full flex flex-col md:flex-row min-h-screen bg-vdark">
+          <aside class="bg-panel border-b border-slate-800 md:border-b-0 md:border-r p-4 flex justify-between items-center shadow-xl md:fixed md:w-64 md:h-screen md:flex-col md:justify-start md:items-stretch z-20">
+            <div class="flex items-center gap-3 md:py-4 md:px-2 md:border-b md:border-slate-800">
+              <div class="bg-accent text-vdark font-black px-2 py-1 rounded text-sm tracking-widest">M10</div>
+              <div>
+                <h1 class="text-sm font-bold tracking-wider text-white">STORAGE HUB</h1>
+                <p class="text-[9px] text-slate-400 tracking-widest uppercase">v2.0 Control Panel</p>
+              </div>
+            </div>
+
+            <nav class="hidden md:flex flex-col gap-1 mt-6">
+              ${visibleMenus.map(menu => `
+                <a href="${menu.hash}" class="nav-btn p-3 rounded-xl flex items-center gap-3 text-sm transition-all hover:bg-slate-800 hover:text-white text-slate-400">
+                  <i class="fa-solid ${menu.icon} w-5 text-center text-base"></i> <span>${menu.label}</span>
+                </a>
+              `).join('')}
+            </nav>
+
+            <div class="text-right md:text-left text-xs bg-vdark bg-opacity-60 p-3 rounded-xl md:mt-auto md:mb-2 flex items-center justify-between gap-3 border border-slate-800">
+              <div class="truncate">
+                <p class="font-semibold text-slate-200 truncate">${currentUser.email.split('@')[0]}</p>
+                <p class="text-[9px] text-accent font-bold uppercase tracking-widest mt-0.5">${userRole.replace('_', ' ')}</p>
+              </div>
+              <button id="btn-logout" class="text-rose-400 bg-slate-800 hover:bg-rose-950 hover:text-rose-300 rounded-lg w-8 h-8 flex items-center justify-center border border-slate-700 transition-colors shadow">
+                <i class="fa-solid fa-power-off text-sm"></i>
+              </button>
+            </div>
+          </aside>
+
+          <main class="flex-1 p-4 md:p-10 md:ml-64 no-scrollbar overflow-y-auto">
+            <div id="content-area" class="max-w-5xl mx-auto"></div>
+          </main>
+
+          <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-panel border-t border-slate-800 shadow-2xl flex justify-around items-center h-16 z-30">
+            ${visibleMenus.map(menu => `
+              <a href="${menu.hash}" class="nav-btn flex flex-col items-center justify-center text-[10px] text-slate-400 w-full h-full border-t-2 border-transparent">
+                <i class="fa-solid ${menu.icon} text-lg mb-0.5"></i>
+                <span>${menu.label}</span>
+              </a>
+            `).join('')}
+          </nav>
+        </div>
+      `;
+    }
+
+    function setupLayoutListeners() {
+      document.getElementById('btn-logout').addEventListener('click', () => {
+        Swal.fire({
+          title: 'Sign Out?',
+          text: "Akhiri sesi manajemen operasional gudang saat ini?",
+          icon: 'neutral',
+          showCancelButton: true,
+          confirmButtonColor: '#f43f5e',
+          cancelButtonColor: '#475569',
+          confirmButtonText: 'Keluar',
+          cancelButtonText: 'Batal'
+        }).then((result) => { if (result.isConfirmed) supabase.auth.signOut(); });
+      });
+    }
+
+    // ==========================================
+    // COMPONENT: LOGIN PAGE (DARK & CLEAN)
+    // ==========================================
+    function renderLogin(errorMessage = "") {
+      document.getElementById('app').innerHTML = `
+        <div class="min-h-screen w-full flex items-center justify-center p-4 bg-vdark">
+          <div class="bg-panel rounded-2xl shadow-2xl p-8 w-full max-w-md border border-slate-800">
+            <div class="text-center mb-8">
+              <span class="bg-accent text-vdark text-xs font-black px-2.5 py-1 rounded tracking-widest inline-block mb-3 shadow-md">CONTROL CENTER</span>
+              <h2 class="text-2xl font-bold text-white tracking-tight">Sign In to Dashboard</h2>
+              <p class="text-xs text-slate-400 mt-1">Aplikasi Manajemen Logistik Internal Gudang</p>
+            </div>
+            
+            ${errorMessage ? `<div class="bg-rose-950 border border-rose-800 text-rose-300 p-3 rounded-xl text-xs font-semibold mb-5 flex items-center gap-2"><i class="fa-solid fa-circle-exclamation text-base"></i> ${errorMessage}</div>` : ''}
+            
+            <form id="form-login" class="space-y-4">
+              <div>
+                <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Email Karyawan</label>
+                <div class="relative">
+                  <i class="fa-solid fa-envelope absolute left-3.5 top-3.5 text-slate-500 text-sm"></i>
+                  <input type="email" id="login-email" placeholder="nama@mitra10.com" required class="w-full bg-vdark text-white pl-10 pr-3 py-3 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm">
+                </div>
+              </div>
+              <div>
+                <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Password</label>
+                <div class="relative">
+                  <i class="fa-solid fa-lock absolute left-3.5 top-3.5 text-slate-500 text-sm"></i>
+                  <input type="password" id="login-password" placeholder="••••••••" required class="w-full bg-vdark text-white pl-10 pr-3 py-3 border border-slate-700 rounded-xl focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent text-sm">
+                </div>
+              </div>
+              <button type="submit" class="w-full bg-accent hover:bg-accentHover text-vdark py-3.5 rounded-xl font-bold text-sm tracking-wide shadow-lg transition-all active:scale-[0.98] mt-2 flex items-center justify-center gap-2">
+                <span>MASUK SISTEM</span> <i class="fa-solid fa-right-to-bracket"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('form-login').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        
+        Swal.fire({ title: 'Authenticating...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        Swal.close();
+        if (error) renderLogin(error.message === "Invalid login credentials" ? "Email atau password salah." : error.message);
+      });
+    }
+
+    // ==========================================
+    // COMPONENT: DASHBOARD dashboard (NEW AGGREGATION)
+    // ==========================================
+    async function viewDashboard(container) {
+      container.innerHTML = `
+        <div class="flex justify-between items-center mb-6">
+          <div>
+            <h2 class="text-2xl font-bold text-white tracking-tight">Dashboard</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Kondisi persediaan barang fisik real-time.</p>
+          </div>
+          <button id="refresh-dashboard" class="bg-panel border border-slate-800 p-2.5 rounded-xl text-sm shadow hover:bg-slate-800 text-slate-300 transition-colors"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div class="bg-panel border border-slate-800 p-4 rounded-2xl">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Total Masuk</p>
+            <h3 id="stat-total-masuk" class="text-2xl font-bold text-emerald-400 mt-1">0</h3>
+          </div>
+          <div class="bg-panel border border-slate-800 p-4 rounded-2xl">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-amber-400">Stok Kritis</p>
+            <h3 id="stat-kritis" class="text-2xl font-bold text-amber-400 mt-1">0</h3>
+          </div>
+          <div class="bg-panel border border-slate-800 p-4 rounded-2xl">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Total Keluar</p>
+            <h3 id="stat-total-keluar" class="text-2xl font-bold text-rose-400 mt-1">0</h3>
+          </div>
+          <div class="bg-panel border border-slate-800 p-4 rounded-2xl">
+            <p class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Total Order</p>
+            <h3 id="stat-total-order" class="text-2xl font-bold text-sky-400 mt-1">0</h3>
+          </div>
+        </div>
+
+        <div class="bg-panel border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+          <div class="p-4 border-b border-slate-800 bg-slate-900 bg-opacity-40">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider">Status Inventory</h3>
+          </div>
+          <div id="dashboard-list" class="divide-y divide-slate-800">
+            <div class="text-center py-10"><i class="fa-solid fa-circle-notch animate-spin text-2xl text-accent"></i></div>
+          </div>
+        </div>
+      `;
+
+      async function loadData() {
+        const listDiv = document.getElementById('dashboard-list');
+        
+        // Tarik data paralel untuk performa kencang
+        const [resBarang, resMasuk, resKeluar, resOrder] = await Promise.all([
+          supabase.from('barang').select('*').order('nama_barang', { ascending: true }),
+          supabase.from('barang_masuk').select('barang_id, jumlah_masuk'),
+          supabase.from('barang_keluar').select('barang_id, jumlah_keluar'),
+          supabase.from('orders').select('barang_id, jumlah_order')
+        ]);
+
+        if (resBarang.error) return listDiv.innerHTML = `<p class="p-4 text-xs text-rose-400">Gagal memuat matriks data.</p>`;
+        const barang = resBarang.data;
+        if (barang.length === 0) return listDiv.innerHTML = `<p class="p-8 text-xs text-center text-slate-500">Belum ada item terdaftar di sistem.</p>`;
+
+        // Hitung KPI Global Atas
+        let globalMasuk = resMasuk.data?.reduce((acc, curr) => acc + curr.jumlah_masuk, 0) || 0;
+        let globalKeluar = resKeluar.data?.reduce((acc, curr) => acc + curr.jumlah_keluar, 0) || 0;
+        let globalOrder = resOrder.data?.reduce((acc, curr) => acc + curr.jumlah_order, 0) || 0;
+        let totalKritis = 0;
+
+        listDiv.innerHTML = barang.map(b => {
+          const isKritis = b.stok_actual <= b.stok_minimum;
+          if (isKritis) totalKritis++;
+
+          // Hitung akumulasi per barang individual
+          let itemMasuk = resMasuk.data?.filter(m => m.barang_id === b.id).reduce((acc, curr) => acc + curr.jumlah_masuk, 0) || 0;
+          let itemKeluar = resKeluar.data?.filter(k => k.barang_id === b.id).reduce((acc, curr) => acc + curr.jumlah_keluar, 0) || 0;
+          let itemOrder = resOrder.data?.filter(o => o.barang_id === b.id).reduce((acc, curr) => acc + curr.jumlah_order, 0) || 0;
+
+          return `
+            <div class="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors hover:bg-slate-800 hover:bg-opacity-40">
+              <div class="space-y-1">
+                <div class="flex items-center gap-2">
+                  <h4 class="font-bold text-slate-200 text-sm md:text-base">${b.nama_barang}</h4>
+                  <span class="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">${b.category}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                  <span>Limit: <span class="font-semibold text-slate-400">${b.stok_minimum}</span></span>
+                  <span class="text-slate-700">|</span>
+                  <span>Masuk: <span class="font-semibold text-emerald-400">${itemMasuk}</span></span>
+                  <span>Keluar: <span class="font-semibold text-rose-400">${itemKeluar}</span></span>
+                  <span>Order: <span class="font-semibold text-sky-400">${itemOrder}</span></span>
+                </div>
+              </div>
+              <div class="text-left md:text-right flex md:flex-col justify-between items-center md:items-end border-t border-slate-800 md:border-none pt-2 md:pt-0">
+                <span class="text-xl md:text-2xl font-black ${isKritis ? 'text-amber-400' : 'text-emerald-400'}">${b.stok_actual} <span class="text-xs font-normal text-slate-500">Stok</span></span>
+                <p class="text-[9px] font-bold uppercase tracking-widest ${isKritis ? 'text-amber-500' : 'text-emerald-500'}">${isKritis ? 'LOCKED / REFILL REQ' : 'ACTIVE SAFE'}</p>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        document.getElementById('stat-total-masuk').innerText = globalMasuk;
+        document.getElementById('stat-kritis').innerText = totalKritis;
+        document.getElementById('stat-total-keluar').innerText = globalKeluar;
+        document.getElementById('stat-total-order').innerText = globalOrder;
+      }
+
+      loadData();
+      document.getElementById('refresh-dashboard').addEventListener('click', loadData);
+    }
+
+    // ==========================================
+    // COMPONENT: FORM INPUT DATA MASTER BARANG
+    // ==========================================
+    function viewBarang(container) {
+      container.innerHTML = `
+        <div class="mb-6">
+          <h2 class="text-2xl font-bold text-white tracking-tight">Katalog Induk Master</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Daftarkan SKU baru ke dalam logistik sistem.</p>
+        </div>
+        
+        <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl max-w-xl">
+          <form id="form-add-barang" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Nama Deskripsi Barang</label>
+              <input type="text" id="m-nama" placeholder="Contoh: Bubble Wrap Heavy Duty 50m" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Kategori</label>
+              <select id="m-kategori" class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent">
+                <option value="packing">Packing Kayu</option>
+                <option value="operasional">Operasional</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Stok Fisik Awal</label>
+                <input type="number" id="m-stok" value="0" min="0" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Safety Stock (Batas Kritis)</label>
+                <input type="number" id="m-min" value="100" min="0" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+            </div>
+            <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-accent font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98] mt-2">SIMPAN KE DATA MASTER</button>
+          </form>
+        </div>
+      `;
+
+      document.getElementById('form-add-barang').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const nama_barang = document.getElementById('m-nama').value;
+        const category = document.getElementById('m-kategori').value;
+        const stok_actual = parseInt(document.getElementById('m-stok').value);
+        const stok_minimum = parseInt(document.getElementById('m-min').value);
+
+        Swal.fire({ title: 'Processing DB...', didOpen: () => Swal.showLoading() });
+        const { error } = await supabase.from('barang').insert([{ nama_barang, category, stok_actual, stok_minimum }]);
+        Swal.close();
+
+        if (error) {
+          Swal.fire({ icon: 'error', title: 'DB Error', text: error.message });
+        } else {
+          Swal.fire({ icon: 'success', title: 'Data Saved', text: 'Item baru berhasil didaftarkan.', showConfirmButton: false, timer: 1500 });
+          document.getElementById('form-add-barang').reset();
+        }
+      });
+    }
+
+    // ==========================================
+    // COMPONENT: FORM BARANG MASUK (STOCK IN)
+    // ==========================================
+    async function viewBarangMasuk(container) {
+      container.innerHTML = `
+        <div class="mb-6">
+          <h2 class="text-2xl font-bold text-white tracking-tight">Stock Inbound</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Tambahkan kuantitas barang masuk dari supplier.</p>
+        </div>
+        
+        <div class="grid md:grid-cols-5 gap-6 items-start">
+          <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl md:col-span-3">
+            <form id="form-barang-masuk" class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Nama Barang</label>
+                <select id="masuk-barang-id" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
+                <input type="number" id="masuk-jumlah" min="1" placeholder="Masukkan jumlah unit" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">Confirm</button>
+            </form>
+          </div>
+
+          <div class="md:col-span-2 space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-clock-rotate-left"></i> Inbound Log (3 Hari Terakhir)</h3>
+            <div id="side-log-masuk" class="space-y-2 max-h-[320px] overflow-y-auto pr-1 no-scrollbar"></div>
+          </div>
+        </div>
+      `;
+
+      const selectBarang = document.getElementById('masuk-barang-id');
+      const { data: listBarang } = await supabase.from('barang').select('id, nama_barang').order('nama_barang', { ascending: true });
+      selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+
+      // Fix: Panggil log ringkasan saat halaman pertama dibuka
+      renderSideLog('barang_masuk', 'side-log-masuk', 'Inbound');
+
+      document.getElementById('form-barang-masuk').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const barang_id = selectBarang.value;
+        const jumlah_masuk = parseInt(document.getElementById('masuk-jumlah').value);
+        const admin_id = currentUser.id;
+
+        Swal.fire({ title: 'Updating Ledger...', didOpen: () => Swal.showLoading() });
+        const { error } = await supabase.from('barang_masuk').insert([{ barang_id, jumlah_masuk, admin_id }]);
+        Swal.close();
+
+        if (error) {
+          Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+        } else {
+          Swal.fire({ icon: 'success', title: 'Inbound Success', text: `Stok berhasil ditambahkan sebesar +${jumlah_masuk} unit.`, showConfirmButton: false, timer: 1800 });
+          document.getElementById('form-barang-masuk').reset();
+          // Fix: Segarkan log ringkasan kanan setelah input sukses
+          renderSideLog('barang_masuk', 'side-log-masuk', 'Inbound');
+        }
+      });
+    }
+
+    // ==========================================
+    // COMPONENT: FORM BARANG KELUAR (STOCK OUT)
+    // ==========================================
+    async function viewBarangKeluar(container) {
+      container.innerHTML = `
+        <div class="mb-6">
+          <h2 class="text-2xl font-bold text-white tracking-tight">Stock Outbound / Packing</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Catat pengeluaran barang untuk kebutuhan operasional.</p>
+        </div>
+        
+        <div class="grid md:grid-cols-5 gap-6 items-start">
+          <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl md:col-span-3">
+            <form id="form-barang-keluar" class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Item Keluar</label>
+                <select id="keluar-barang-id" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
+                <input type="number" id="keluar-jumlah" min="1" placeholder="Masukkan jumlah unit" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-rose-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">Confirm</button>
+            </form>
+          </div>
+
+          <div class="md:col-span-2 space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-clock-rotate-left"></i> Outbound Log (3 Hari Terakhir)</h3>
+            <div id="side-log-keluar" class="space-y-2 max-h-[320px] overflow-y-auto pr-1 no-scrollbar"></div>
+          </div>
+        </div>
+      `;
+
+      const selectBarang = document.getElementById('keluar-barang-id');
+      const query = supabase.from('barang').select('id, nama_barang');
+      if (userRole === 'packer') query.eq('category', 'packing');
+      const { data: listBarang } = await query.order('nama_barang', { ascending: true });
+      selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+
+      // Fix: Panggil log ringkasan saat halaman pertama dibuka
+      renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
+
+      document.getElementById('form-barang-keluar').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const barang_id = selectBarang.value;
+        const jumlah_keluar = parseInt(document.getElementById('keluar-jumlah').value);
+        const packer_id = currentUser.id;
+
+        Swal.fire({ title: 'Evaluating Trigger Rules...', didOpen: () => Swal.showLoading() });
+        const { error } = await supabase.from('barang_keluar').insert([{ barang_id, jumlah_keluar, packer_id }]);
+        Swal.close();
+
+        if (error) {
+          const msg = error.message.includes('Ditolak') ? error.message : "Ditolak: Ketersediaan stok fisik di rak tidak mencukupi.";
+          Swal.fire({ icon: 'error', title: 'TRANSAKSI BLOCKER', text: msg, confirmButtonColor: '#f43f5e' });
+        } else {
+          Swal.fire({ icon: 'success', title: 'Outbound Berhasil', text: 'Stok dipotong, barang siap dipacking.', showConfirmButton: false, timer: 1800 });
+          document.getElementById('form-barang-keluar').reset();
+          // Fix: Segarkan log ringkasan kanan setelah input sukses
+          renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
+        }
+      });
+    }
+
+    // ==========================================
+    // COMPONENT: PROCUREMENT / UNLOCK STOCK
+    // ==========================================
+    async function viewOrders(container) {
+      container.innerHTML = `
+        <div class="mb-6">
+          <h2 class="text-2xl font-bold text-white tracking-tight">Pengajuan RO</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Ajukan antrean suplai untuk merilis kunci otomatis sistem.</p>
+        </div>
+        
+        <div class="grid md:grid-cols-5 gap-6 items-start">
+          <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl md:col-span-2">
+            <form id="form-order" class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Barang</label>
+                <select id="order-barang-id" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent"></select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
+                <input type="number" id="order-jumlah" min="1" placeholder="Contoh: 500" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+                            <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Remarks / Notes</label>
+                <input type="text" id="order-remarks" placeholder="Contoh: Supplier JNE / Urgent Masuk" class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98] mt-2"><i class="fa-solid fa-lock-open mr-1"></i> Confirm</button>
+            </form>
+          </div>
+
+          <div class="md:col-span-3 space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">History & Activity Log</h3>
+            <div id="order-list" class="space-y-2"></div>
+          </div>
+        </div>
+      `;
+
+      const selectBarang = document.getElementById('order-barang-id');
+      const { data: listBarang } = await supabase.from('barang').select('id, nama_barang').order('nama_barang', { ascending: true });
+      selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+
+      async function loadOrders() {
+        const orderListDiv = document.getElementById('order-list');
+        // Ambil semua data orders tanpa filter .eq('status', 'Pending') agar riwayat yang Selesai tetap tampil
+        const { data: orders } = await supabase.from('orders').select('*, barang(nama_barang)').order('created_at', { ascending: false });
+        
+        if (!orders || orders.length === 0) {
+          orderListDiv.innerHTML = `<div class="bg-panel border border-slate-800 p-6 text-center text-xs text-slate-500 rounded-xl">Tidak ada aktivitas order/procurement.</div>`;
+          return;
+        }
+
+        orderListDiv.innerHTML = orders.map(o => {
+          const isPending = o.status === 'Pending';
+          
+          // Bedakan style badge berdasarkan status
+          const badgeStyle = isPending 
+            ? 'bg-amber-950 border-amber-800 text-amber-400' 
+            : 'bg-emerald-950 border-emerald-800 text-emerald-400';
+
+          return `
+            <div class="bg-panel border border-slate-800 p-4 rounded-xl flex justify-between items-center text-xs">
+              <div class="space-y-1">
+                <p class="font-bold text-slate-200 text-sm">${o.barang?.nama_barang || 'Item Terhapus'}</p>
+                <p class="text-slate-400">Volume Permintaan: <span class="font-bold ${isPending ? 'text-accent' : 'text-emerald-400'}">${o.jumlah_order} Pcs</span></p>
+                <p class="text-[11px] text-slate-500 italic flex items-center gap-1 mt-0.5">
+                  <i class="fa-solid fa-comment-dots text-slate-600"></i>
+                  <span>${o.remarks || 'Tanpa catatan'}</span>
+                </p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="${badgeStyle} border px-2.5 py-0.5 rounded font-bold uppercase text-[9px] tracking-widest">${o.status}</span>
+                ${isPending && (userRole === 'super_admin' || userRole === 'admin_order' || userRole === 'admin_gudang') ? `
+                  <button data-id="${o.id}" class="btn-complete-order bg-slate-800 hover:bg-slate-700 border border-slate-700 text-accent px-3 py-1.5 rounded-lg ml-1 font-semibold transition-colors active:scale-95">Selesai</button>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        document.querySelectorAll('.btn-complete-order').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const id = e.target.getAttribute('data-id');
+            Swal.fire({ title: 'Resolving order state...', didOpen: () => Swal.showLoading() });
+            await supabase.from('orders').update({ status: 'Selesai' }).eq('id', id);
+            Swal.close();
+            loadOrders();
+            
+            // Injeksi: Kirim sinyal render ulang ke side log ringkas procurement jika div-nya aktif
+            if(document.getElementById('order-list')) {
+              renderSideLog('orders', 'order-list', 'Procurement');
+            }
+          });
+        });
+      }
+
+      document.getElementById('form-order').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const barang_id = selectBarang.value;
+        const jumlah_order = parseInt(document.getElementById('order-jumlah').value);
+        // Ambil isi dari input remarks yang baru saja kita buat
+        const remarks = document.getElementById('order-remarks').value;
+
+        Swal.fire({ title: 'Creating Pipeline...', didOpen: () => Swal.showLoading() });
+        const { error } = await supabase.from('orders').insert([{ 
+          barang_id, 
+          jumlah_order, 
+          status: 'Pending',
+          remarks: remarks || null 
+        }]);
+        Swal.close();
+
+        if (error) {
+          Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+        } else {
+          Swal.fire({ icon: 'success', title: 'Gembok Terbuka', text: 'Order dibuat. Packer diijinkan mencatat barang keluar.', confirmButtonColor: '#38bdf8' });
+          document.getElementById('form-order').reset();
+          loadOrders(); // Ini akan memicu render ulang daftar order gabungan (Pending + Selesai)
+          
+          // Injeksi: Render ulang side log ringkas procurement agar langsung update datanya
+          if(document.getElementById('order-list')) {
+            renderSideLog('orders', 'order-list', 'Procurement');
+          }
+        }
+      });
+
+      // PANGGIL DI SINI AGAR SAAT MENU PROCUREMENT DIBUKA, LOG LANGSUNG OTOMATIS DI-LOAD
+      setTimeout(() => {
+        loadOrders();
+      }, 100);
+    }
+
+    // HELPER: Ambil nama depan dari email
+    function getFirstName(email) {
+      if (!email) return 'System';
+      return email.split('@')[0];
+    }
+
+    // HELPER: Render log aktivitas ringkas (3 Hari Terakhir) untuk panel kanan (FIXED UTC & TIMEZONE WIB)
+    async function renderSideLog(table, containerId, actionType = '') {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      // Tentukan kolom pengurutan yang benar berdasarkan tabelnya
+      const sortColumn = table === 'barang_masuk' ? 'tanggal_masuk' : (table === 'barang_keluar' ? 'tanggal_keluar' : 'tanggal_order');
+
+      let query = supabase.from(table).select('*, barang(nama_barang)').order(sortColumn, { ascending: false }).limit(10);
+      let { data: logs, error } = await query;
+
+      // Tambahan Console Log Pelacak
+      console.log(`[DEBUG LOG KANAN] Tabel: ${table}`, { data: logs, error: error });
+
+      // Fallback: Jika relasi join nama_barang error, ambil data polosan tanpa join nama barang agar tetap muncul
+      if (error && error.code === "PGRST200") {
+        const retryQuery = await supabase.from(table).select('*').order(sortColumn, { ascending: false }).limit(10);
+        logs = retryQuery.data;
+      }
+
+      if (!logs || logs.length === 0) {
+        container.innerHTML = `<p class="text-slate-500 text-center py-6">Tidak ada aktivitas log.</p>`;
+        return;
+      }
+
+      container.innerHTML = logs.map(log => {
+        // Ambil tanggal_order jika log berasal dari tabel orders
+        const rawDate = log.tanggal_masuk || log.tanggal_keluar || log.tanggal_order;
+        const dateObj = new Date(rawDate);
+        
+        // Fix: Konversi Waktu Paksa ke WIB Asia/Jakarta
+        const timeStr = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+        const dateStr = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', timeZone: 'Asia/Jakarta' });
+        
+        let qty = log.jumlah_masuk || log.jumlah_keluar || log.jumlah_order || 0;
+        
+        let fallbackName = 'Staff M10';
+        if (currentUser && (log.admin_id === currentUser.id || log.packer_id === currentUser.id)) {
+          fallbackName = getFirstName(currentUser.email);
+        } else {
+          fallbackName = table === 'orders' ? 'Admin Order' : (log.admin_id ? 'Admin Gudang' : 'Packer');
+        }
+
+        // Tentukan teks aktivitas dinamis khusus untuk orders / procurement
+        let displayAction = actionType;
+        if (table === 'orders') {
+          displayAction = log.status === 'Pending' ? 'Pengajuan Procurement (Pending)' : 'Penyelesaian Procurement (Selesai)';
+        }
+
+        return `
+          <div class="p-2.5 bg-slate-900 bg-opacity-60 border border-slate-800 rounded-xl flex items-start gap-2.5 text-xs mb-2">
+            <div class="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded font-mono text-center min-w-[50px]">
+              <div>${timeStr}</div><div class="text-[8px] text-slate-500">${dateStr}</div>
+            </div>
+            <div class="flex-1 text-slate-300">
+              <span class="font-bold text-sky-400 capitalize">${fallbackName}</span> 
+              melakukan <span class="text-amber-400 font-medium">${displayAction}</span> 
+              <span class="font-semibold text-white">${log.barang?.nama_barang || 'Item'}</span> 
+              sebanyak <span class="font-bold text-emerald-400">${qty} unit</span>.
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ==========================================
+    // COMPONENT: HIGH-TECH HISTORY LOG DATA CENTER (FIXED FULL)
+    // ==========================================
+    async function viewHistoryLog(container) {
+      let filterConfig = { user: '', role: '', barangId: '', date: '' };
+
+      container.innerHTML = `
+        <div class="flex justify-between items-center mb-6">
+          <div>
+            <h2 class="text-2xl font-bold text-white tracking-tight">History & Log Activity</h2>
+            <p class="text-xs text-slate-400 mt-0.5">Seluruh jejak transaksi mutasi logistik internal gudang.</p>
+          </div>
+          <div class="flex gap-2">
+            <button id="btn-open-filter" class="bg-panel border border-slate-800 px-4 py-2.5 rounded-xl text-xs shadow hover:bg-slate-800 text-accent font-bold flex items-center gap-2 transition-all">
+              <i class="fa-solid fa-filter"></i> FILTER LOG
+            </button>
+            <button id="btn-reset-filter" class="bg-panel border border-slate-800 p-2.5 rounded-xl text-xs hover:bg-slate-800 text-slate-400 transition-colors"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </div>
+
+        <div class="bg-panel border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="bg-slate-900 bg-opacity-60 text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                  <th class="p-4">Timestamp</th>
+                  <th class="p-4">User Input</th>
+                  <th class="p-4">Role</th>
+                  <th class="p-4">Nama Barang</th>
+                  <th class="p-4 text-right">Type & QTY</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-body" class="divide-y divide-slate-800 text-slate-300">
+                <tr><td colspan="5" class="p-8 text-center"><i class="fa-solid fa-circle-notch animate-spin text-xl text-accent"></i></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      async function compileAndRenderLogs() {
+        const tbody = document.getElementById('history-table-body');
+        
+        // Tarik semua data history logistik menggunakan kolom pengurutan asli yang ada di tabel
+        let [resMasuk, resKeluar, resOrder, resRoles] = await Promise.all([
+          supabase.from('barang_masuk').select('*, barang(nama_barang)').order('tanggal_masuk', { ascending: false }),
+          supabase.from('barang_keluar').select('*, barang(nama_barang)').order('tanggal_keluar', { ascending: false }),
+          supabase.from('orders').select('*, barang(nama_barang)').order('tanggal_order', { ascending: false }),
+          supabase.from('user_roles').select('*')
+        ]);
+
+        // Proteksi Fallback jika Foreign Key bermasalah di database
+        if (resMasuk.error) resMasuk = await supabase.from('barang_masuk').select('*').order('tanggal_masuk', { ascending: false });
+        if (resKeluar.error) resKeluar = await supabase.from('barang_keluar').select('*').order('tanggal_keluar', { ascending: false });
+        if (resOrder.error) resOrder = await supabase.from('orders').select('*').order('tanggal_order', { ascending: false });
+
+        // Tambahan Console Log Pelacak Data Mentah dari Supabase
+        console.log("[DEBUG ARSIP GLOBAL] Data mentah ditarik:", {
+          barang_masuk: resMasuk.data,
+          barang_keluar: resKeluar.data,
+          orders: resOrder.data
+        });
+
+        let masterLogs = [];
+
+        // Gabungkan logs masuk menggunakan kolom tanggal_masuk asli
+        resMasuk.data?.forEach(m => {
+          masterLogs.push({
+            timestamp: new Date(m.tanggal_masuk),
+            userId: m.admin_id,
+            barangName: m.barang?.nama_barang || 'Item Terhapus',
+            barangId: m.barang_id,
+            type: 'MASUK',
+            qty: `+${m.jumlah_masuk}`,
+            color: 'text-emerald-400'
+          });
+        });
+
+        // Gabungkan logs keluar menggunakan kolom tanggal_keluar asli
+        resKeluar.data?.forEach(k => {
+          masterLogs.push({
+            timestamp: new Date(k.tanggal_keluar),
+            userId: k.packer_id,
+            barangName: k.barang?.nama_barang || 'Item Terhapus',
+            barangId: k.barang_id,
+            type: 'KELUAR',
+            qty: `-${k.jumlah_keluar}`,
+            color: 'text-rose-400'
+          });
+        });
+
+        // Gabungkan logs keluar menggunakan kolom tanggal_keluar asli
+        resKeluar.data?.forEach(k => {
+          masterLogs.push({
+            timestamp: new Date(k.tanggal_keluar),
+            userId: k.packer_id,
+            barangName: k.barang?.nama_barang || 'Item Terhapus',
+            barangId: k.barang_id,
+            type: 'KELUAR',
+            qty: `-${k.jumlah_keluar}`,
+            color: 'text-rose-400'
+          });
+        });
+
+        // INJEKSI BARU: Gabungkan logs dari tabel orders (Procurement) ke Log Global
+        resOrder.data?.forEach(o => {
+          const isPending = o.status === 'Pending';
+          masterLogs.push({
+            timestamp: new Date(o.tanggal_order),
+            userId: null, // Fallback peran otomatis nanti di render
+            roleFallback: 'Admin Order',
+            barangName: o.barang?.nama_barang || 'Item Terhapus',
+            barangId: o.barang_id,
+            type: isPending ? 'PROCUREMENT (PENDING)' : 'PROCUREMENT (SELESAI)',
+            qty: `${o.jumlah_order} Pcs`,
+            color: isPending ? 'text-amber-400' : 'text-cyan-400'
+          });
+        });
+
+        // Urutkan berdasarkan waktu paling baru
+        masterLogs.sort((a, b) => b.timestamp - a.timestamp);
+
+        // Tambahan Console Log Hasil Penggabungan Sebelum Filter Terpasang
+        console.log("[DEBUG ARSIP GLOBAL] Hasil kompilasi masterLogs awal:", masterLogs);
+
+        // Petakan UUID ke role dari tabel user_roles
+        const roleMap = {};
+        resRoles.data?.forEach(r => { roleMap[r.user_id] = r.role; });
+
+        let filtered = masterLogs.filter(log => {
+          if (filterConfig.barangId && log.barangId.toString() !== filterConfig.barangId) return false;
+          if (filterConfig.date) {
+            // Evaluasi penanggalan sesuai format lokal komputer
+            const logDate = log.timestamp.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // Format YYYY-MM-DD
+            if (logDate !== filterConfig.date) return false;
+          }
+          if (filterConfig.role) {
+            const currentRole = roleMap[log.userId] || 'system';
+            if (currentRole !== filterConfig.role) return false;
+          }
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-500">Tidak ada log yang cocok dengan filter.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = filtered.map(log => {
+          // Fix: Konversi Waktu arsip utama ke format WIB Indonesia
+          const formattedTime = log.timestamp.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jakarta' });
+          
+          // Deteksi role secara dinamis berdasarkan tabel asalnya
+          const determinedRole = roleMap[log.userId] || (log.roleFallback ? 'admin_order' : 'system');
+          
+          // Tentukan display nama penginput
+          let userDisplay = 'System';
+          if (log.userId) {
+            userDisplay = log.userId === currentUser.id ? getFirstName(currentUser.email) : 'Karyawan';
+          } else if (log.roleFallback) {
+            userDisplay = 'Admin Order';
+          }
+
+          return `
+            <tr class="hover:bg-slate-800 hover:bg-opacity-30 transition-colors">
+              <td class="p-4 font-mono text-slate-400">${formattedTime}</td>
+              <td class="p-4 font-semibold text-white capitalize">${userDisplay}</td>
+              <td class="p-4"><span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400">${determinedRole.replace('_', ' ')}</span></td>
+              <td class="p-4 text-slate-200 font-medium">${log.barangName}</td>
+              <td class="p-4 text-right font-bold ${log.color}">${log.qty} <span class="text-[9px] text-slate-500 font-normal">${log.type}</span></td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      // POPUP FILTER MENGGUNAKAN SWEETALERT2
+      document.getElementById('btn-open-filter').addEventListener('click', async () => {
+        const { data: listBarang } = await supabase.from('barang').select('id, nama_barang');
+        const optionsBarang = listBarang?.map(b => `<option value="${b.id}" ${filterConfig.barangId == b.id ? 'selected':''}>${b.nama_barang}</option>`).join('') || '';
+
+        Swal.fire({
+          title: '<span class="text-sm uppercase tracking-wider text-accent font-bold">Filter Log History</span>',
+          html: `
+            <div class="space-y-3 text-left text-xs p-1">
+              <div>
+                <label class="block text-slate-400 mb-1">Pilih Komoditas Barang</label>
+                <select id="f-barang" class="w-full bg-vdark text-white p-2.5 border border-slate-700 rounded-lg focus:outline-none"><option value="">-- Semua Barang --</option>${optionsBarang}</select>
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Pilih Hak Akses (Role)</label>
+                <select id="f-role" class="w-full bg-vdark text-white p-2.5 border border-slate-700 rounded-lg focus:outline-none">
+                  <option value="">-- Semua Role --</option>
+                  <option value="super_admin" ${filterConfig.role === 'super_admin'?'selected':''}>Super Admin</option>
+                  <option value="packer" ${filterConfig.role === 'packer'?'selected':''}>Packer</option>
+                  <option value="admin_gudang" ${filterConfig.role === 'admin_gudang'?'selected':''}>Admin Gudang</option>
+                  <option value="admin_order" ${filterConfig.role === 'admin_order'?'selected':''}>Admin Order</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-400 mb-1">Pilih Berdasarkan Kalender</label>
+                <input type="date" id="f-date" value="${filterConfig.date}" class="w-full bg-vdark text-white p-2.5 border border-slate-700 rounded-lg focus:outline-none">
+              </div>
+            </div>
+          `,
+          showCancelButton: true,
+          confirmButtonText: 'Terapkan Filter',
+          cancelButtonText: 'Batal',
+          confirmButtonColor: '#38bdf8',
+          cancelButtonColor: '#475569'
+        }).then((result) => {
+          if (result.isConfirmed) {
+            filterConfig.barangId = document.getElementById('f-barang').value;
+            filterConfig.role = document.getElementById('f-role').value;
+            filterConfig.date = document.getElementById('f-date').value;
+            compileAndRenderLogs();
+          }
+        });
+      });
+
+      document.getElementById('btn-reset-filter').addEventListener('click', () => {
+        filterConfig = { user: '', role: '', barangId: '', date: '' };
+        compileAndRenderLogs();
+      });
+
+      compileAndRenderLogs();
+    }
+
+    // RUN BOOT ENGINE
+    initApp();
+  </script>
+</body>
+</html>
