@@ -440,6 +440,7 @@
     // COMPONENT: FORM BARANG MASUK (STOCK IN)
     // ==========================================
     async function viewBarangMasuk(container) {
+      // 1. Suntik susunan HTML utama ke container panel
       container.innerHTML = `
         <div class="mb-6">
           <h2 class="text-2xl font-bold text-white tracking-tight">Stock Inbound</h2>
@@ -450,14 +451,14 @@
           <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl md:col-span-3">
             <form id="form-barang-masuk" class="space-y-4">
               <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Nama Barang</label>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Item Komoditas</label>
                 <select id="masuk-barang-id" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent"></select>
               </div>
               <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Jumlah Kuantitas Masuk</label>
                 <input type="number" id="masuk-jumlah" min="1" placeholder="Masukkan jumlah unit" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
               </div>
-              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">Confirm</button>
+              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">SUBMIT INBOUND</button>
             </form>
           </div>
 
@@ -468,32 +469,52 @@
         </div>
       `;
 
+      // 2. Isi dropdown komoditas barang
       const selectBarang = document.getElementById('masuk-barang-id');
-      const { data: listBarang } = await supabase.from('barang').select('id, nama_barang').order('nama_barang', { ascending: true });
-      selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+      if (selectBarang) {
+        const { data: listBarang } = await supabase.from('barang').select('id, nama_barang').order('nama_barang', { ascending: true });
+        selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '<option value="">Tidak ada barang tersedia</option>';
+      }
 
-      // Fix: Panggil log ringkasan saat halaman pertama dibuka
+      // 3. Amankan form dan pasang event listener dengan pengecekan blok IF
+      const formMasuk = document.getElementById('form-barang-masuk');
+      if (formMasuk) {
+        formMasuk.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          const barang_id = document.getElementById('masuk-barang-id').value;
+          const jumlah_masuk = parseInt(document.getElementById('masuk-jumlah').value);
+          const admin_id = currentUser?.id;
+
+          if (!barang_id || !jumlah_masuk) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: 'Data input tidak valid.' });
+            return;
+          }
+
+          Swal.fire({ title: 'Updating Ledger...', didOpen: () => Swal.showLoading() });
+          const { error } = await supabase.from('barang_masuk').insert([{ barang_id, jumlah_masuk, admin_id }]);
+          Swal.close();
+
+          if (error) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+          } else {
+            Swal.fire({ 
+              icon: 'success', 
+              title: 'Inbound Success', 
+              text: `Stok berhasil ditambahkan sebesar +${jumlah_masuk} unit.`, 
+              showConfirmButton: false, 
+              timer: 1800 
+            });
+            formMasuk.reset();
+            
+            // Refresh log kanan setelah input berhasil dilakukan
+            renderSideLog('barang_masuk', 'side-log-masuk', 'Inbound');
+          }
+        });
+      }
+
+      // 4. Jalankan render log samping di baris paling terakhir setelah penyiapan DOM selesai seutuhnya
       renderSideLog('barang_masuk', 'side-log-masuk', 'Inbound');
-
-      document.getElementById('form-barang-masuk').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const barang_id = selectBarang.value;
-        const jumlah_masuk = parseInt(document.getElementById('masuk-jumlah').value);
-        const admin_id = currentUser.id;
-
-        Swal.fire({ title: 'Updating Ledger...', didOpen: () => Swal.showLoading() });
-        const { error } = await supabase.from('barang_masuk').insert([{ barang_id, jumlah_masuk, admin_id }]);
-        Swal.close();
-
-        if (error) {
-          Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
-        } else {
-          Swal.fire({ icon: 'success', title: 'Inbound Success', text: `Stok berhasil ditambahkan sebesar +${jumlah_masuk} unit.`, showConfirmButton: false, timer: 1800 });
-          document.getElementById('form-barang-masuk').reset();
-          // Fix: Segarkan log ringkasan kanan setelah input sukses
-          renderSideLog('barang_masuk', 'side-log-masuk', 'Inbound');
-        }
-      });
     }
 
     // ==========================================
@@ -565,7 +586,7 @@
     async function viewOrders(container) {
       container.innerHTML = `
         <div class="mb-6">
-          <h2 class="text-2xl font-bold text-white tracking-tight">Pengajuan RO</h2>
+          <h2 class="text-2xl font-bold text-white tracking-tight">Procurement Panel (Buka Gembok)</h2>
           <p class="text-xs text-slate-400 mt-0.5">Ajukan antrean suplai untuk merilis kunci otomatis sistem.</p>
         </div>
         
@@ -573,36 +594,67 @@
           <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl md:col-span-2">
             <form id="form-order" class="space-y-4">
               <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Barang</label>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Barang Kritis</label>
                 <select id="order-barang-id" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-slate-300 focus:outline-none focus:border-accent"></select>
               </div>
               <div>
-                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Jumlah Pengadaan</label>
                 <input type="number" id="order-jumlah" min="1" placeholder="Contoh: 500" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
               </div>
-                            <div>
+              <div>
                 <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Remarks / Notes</label>
                 <input type="text" id="order-remarks" placeholder="Contoh: Supplier JNE / Urgent Masuk" class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
               </div>
-              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98] mt-2"><i class="fa-solid fa-lock-open mr-1"></i> Confirm</button>
+              <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98] mt-2"><i class="fa-solid fa-lock-open mr-1"></i> SUBMIT & BYPASS LOCK</button>
             </form>
           </div>
 
           <div class="md:col-span-3 space-y-3">
-            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">History & Activity Log</h3>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Procurement & Supply Activity Log</h3>
             <div id="order-list" class="space-y-2"></div>
           </div>
         </div>
       `;
 
+      // AMANKAN EVENT LISTENER DI SINI (Langsung pasang setelah HTML disuntik)
+      const formOrder = document.getElementById('form-order');
+      if (formOrder) {
+        formOrder.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const barang_id = document.getElementById('order-barang-id').value;
+          const jumlah_order = parseInt(document.getElementById('order-jumlah').value);
+          const remarks = document.getElementById('order-remarks').value;
+
+          Swal.fire({ title: 'Creating Pipeline...', didOpen: () => Swal.showLoading() });
+          const { error } = await supabase.from('orders').insert([{ 
+            barang_id, 
+            jumlah_order, 
+            status: 'Pending',
+            remarks: remarks || null 
+          }]);
+          Swal.close();
+
+          if (error) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+          } else {
+            Swal.fire({ icon: 'success', title: 'Gembok Terbuka', text: 'Order dibuat. Packer diijinkan mencatat barang keluar.', confirmButtonColor: '#38bdf8' });
+            formOrder.reset();
+            loadOrders();
+          }
+        });
+      }
+
       const selectBarang = document.getElementById('order-barang-id');
       const { data: listBarang } = await supabase.from('barang').select('id, nama_barang').order('nama_barang', { ascending: true });
-      selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+      if (selectBarang) {
+        selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
+      }
 
       async function loadOrders() {
         const orderListDiv = document.getElementById('order-list');
-        // Ambil semua data orders tanpa filter .eq('status', 'Pending') agar riwayat yang Selesai tetap tampil
-        const { data: orders } = await supabase.from('orders').select('*, barang(nama_barang)').order('created_at', { ascending: false });
+        if (!orderListDiv) return; // Proteksi navigasi menu SPA
+        
+        const { data: orders } = await supabase.from('orders').select('*, barang(nama_barang)').order('tanggal_order', { ascending: false });
         
         if (!orders || orders.length === 0) {
           orderListDiv.innerHTML = `<div class="bg-panel border border-slate-800 p-6 text-center text-xs text-slate-500 rounded-xl">Tidak ada aktivitas order/procurement.</div>`;
@@ -611,16 +663,13 @@
 
         orderListDiv.innerHTML = orders.map(o => {
           const isPending = o.status === 'Pending';
-          
-          // Bedakan style badge berdasarkan status
-          const badgeStyle = isPending 
-            ? 'bg-amber-950 border-amber-800 text-amber-400' 
-            : 'bg-emerald-950 border-emerald-800 text-emerald-400';
+          const badgeStyle = isPending ? 'bg-amber-950 border-amber-800 text-amber-400' : 'bg-emerald-950 border-emerald-800 text-emerald-400';
+          const namaBarangFix = o.barang?.nama_barang || 'Item Komoditas';
 
           return `
             <div class="bg-panel border border-slate-800 p-4 rounded-xl flex justify-between items-center text-xs">
               <div class="space-y-1">
-                <p class="font-bold text-slate-200 text-sm">${o.barang?.nama_barang || 'Item Terhapus'}</p>
+                <p class="font-bold text-slate-200 text-sm">${namaBarangFix}</p>
                 <p class="text-slate-400">Volume Permintaan: <span class="font-bold ${isPending ? 'text-accent' : 'text-emerald-400'}">${o.jumlah_order} Pcs</span></p>
                 <p class="text-[11px] text-slate-500 italic flex items-center gap-1 mt-0.5">
                   <i class="fa-solid fa-comment-dots text-slate-600"></i>
@@ -644,49 +693,12 @@
             await supabase.from('orders').update({ status: 'Selesai' }).eq('id', id);
             Swal.close();
             loadOrders();
-            
-            // Injeksi: Kirim sinyal render ulang ke side log ringkas procurement jika div-nya aktif
-            if(document.getElementById('order-list')) {
-              renderSideLog('orders', 'order-list', 'Procurement');
-            }
           });
         });
       }
 
-      document.getElementById('form-order').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const barang_id = selectBarang.value;
-        const jumlah_order = parseInt(document.getElementById('order-jumlah').value);
-        // Ambil isi dari input remarks yang baru saja kita buat
-        const remarks = document.getElementById('order-remarks').value;
-
-        Swal.fire({ title: 'Creating Pipeline...', didOpen: () => Swal.showLoading() });
-        const { error } = await supabase.from('orders').insert([{ 
-          barang_id, 
-          jumlah_order, 
-          status: 'Pending',
-          remarks: remarks || null 
-        }]);
-        Swal.close();
-
-        if (error) {
-          Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
-        } else {
-          Swal.fire({ icon: 'success', title: 'Gembok Terbuka', text: 'Order dibuat. Packer diijinkan mencatat barang keluar.', confirmButtonColor: '#38bdf8' });
-          document.getElementById('form-order').reset();
-          loadOrders(); // Ini akan memicu render ulang daftar order gabungan (Pending + Selesai)
-          
-          // Injeksi: Render ulang side log ringkas procurement agar langsung update datanya
-          if(document.getElementById('order-list')) {
-            renderSideLog('orders', 'order-list', 'Procurement');
-          }
-        }
-      });
-
-      // PANGGIL DI SINI AGAR SAAT MENU PROCUREMENT DIBUKA, LOG LANGSUNG OTOMATIS DI-LOAD
-      setTimeout(() => {
-        loadOrders();
-      }, 100);
+      // Jalankan load data
+      loadOrders();
     }
 
     // HELPER: Ambil nama depan dari email
@@ -696,68 +708,73 @@
     }
 
     // HELPER: Render log aktivitas ringkas (3 Hari Terakhir) untuk panel kanan (FIXED UTC & TIMEZONE WIB)
-    async function renderSideLog(table, containerId, actionType = '') {
-      const container = document.getElementById(containerId);
-      if (!container) return;
-
-      // Tentukan kolom pengurutan yang benar berdasarkan tabelnya
-      const sortColumn = table === 'barang_masuk' ? 'tanggal_masuk' : (table === 'barang_keluar' ? 'tanggal_keluar' : 'tanggal_order');
-
-      let query = supabase.from(table).select('*, barang(nama_barang)').order(sortColumn, { ascending: false }).limit(10);
-      let { data: logs, error } = await query;
-
-      // Tambahan Console Log Pelacak
-      console.log(`[DEBUG LOG KANAN] Tabel: ${table}`, { data: logs, error: error });
-
-      // Fallback: Jika relasi join nama_barang error, ambil data polosan tanpa join nama barang agar tetap muncul
-      if (error && error.code === "PGRST200") {
-        const retryQuery = await supabase.from(table).select('*').order(sortColumn, { ascending: false }).limit(10);
-        logs = retryQuery.data;
-      }
-
-      if (!logs || logs.length === 0) {
-        container.innerHTML = `<p class="text-slate-500 text-center py-6">Tidak ada aktivitas log.</p>`;
+    async function renderSideLog(table, elementId, label) {
+      const container = document.getElementById(elementId);
+      
+      // DEBUG 1: Cek apakah container HTML-nya ada di halaman saat ini
+      console.log(`[DEBUG LOG SAMPING] Memulai render untuk elemen: #${elementId}. Apakah elemen ditemukan di DOM?`, !!container);
+      
+      if (!container) {
+        console.warn(`[DEBUG LOG SAMPING] Peringatan: Elemen #${elementId} tidak ditemukan di layar. Kueri ke tabel ${table} dibatalkan untuk mencegah crash.`);
         return;
       }
 
-      container.innerHTML = logs.map(log => {
-        // Ambil tanggal_order jika log berasal dari tabel orders
-        const rawDate = log.tanggal_masuk || log.tanggal_keluar || log.tanggal_order;
-        const dateObj = new Date(rawDate);
-        
-        // Fix: Konversi Waktu Paksa ke WIB Asia/Jakarta
-        const timeStr = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
-        const dateStr = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', timeZone: 'Asia/Jakarta' });
-        
-        let qty = log.jumlah_masuk || log.jumlah_keluar || log.jumlah_order || 0;
-        
-        let fallbackName = 'Staff M10';
-        if (currentUser && (log.admin_id === currentUser.id || log.packer_id === currentUser.id)) {
-          fallbackName = getFirstName(currentUser.email);
-        } else {
-          fallbackName = table === 'orders' ? 'Admin Order' : (log.admin_id ? 'Admin Gudang' : 'Packer');
+      try {
+        // Jalankan kueri ke Supabase dengan relasi join barang
+        console.log(`[DEBUG LOG SAMPING] Menembak kueri ke tabel Supabase: "${table}"...`);
+        const { data, error } = await supabase
+          .from(table)
+          .select('*, barang(nama_barang)')
+          .order(table === 'barang_masuk' ? 'tanggal_masuk' : 'tanggal_keluar', { ascending: false })
+          .limit(10);
+
+        // DEBUG 2: Cetak hasil tembakan ke Supabase (Masuk/Error/Kosong)
+        console.log(`[DEBUG LOG SAMPING] Hasil dari tabel "${table}":`, { data, error });
+
+        if (error) {
+          console.error(`[DEBUG LOG SAMPING] ERROR SUPABASE pada tabel "${table}":`, error.message, error.details, error.hint);
+          container.innerHTML = `<div class="text-xs text-rose-400 p-2 border border-rose-900 bg-rose-950 bg-opacity-30 rounded-xl">Error Supabase: ${error.message}</div>`;
+          return;
         }
 
-        // Tentukan teks aktivitas dinamis khusus untuk orders / procurement
-        let displayAction = actionType;
-        if (table === 'orders') {
-          displayAction = log.status === 'Pending' ? 'Pengajuan Procurement (Pending)' : 'Penyelesaian Procurement (Selesai)';
+        if (!data || data.length === 0) {
+          console.log(`[DEBUG LOG SAMPING] Koneksi sukses, tetapi data di tabel "${table}" kosong (0 baris).`);
+          container.innerHTML = `
+            <div class="bg-panel border border-slate-800 p-4 text-center text-[11px] text-slate-500 rounded-xl flex flex-col items-center gap-1">
+              <i class="fa-solid fa-folder-open text-slate-600 text-sm"></i>
+              <span>Belum ada aktivitas ${label} hari ini.</span>
+            </div>
+          `;
+          return;
         }
 
-        return `
-          <div class="p-2.5 bg-slate-900 bg-opacity-60 border border-slate-800 rounded-xl flex items-start gap-2.5 text-xs mb-2">
-            <div class="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded font-mono text-center min-w-[50px]">
-              <div>${timeStr}</div><div class="text-[8px] text-slate-500">${dateStr}</div>
+        // Render data jika berhasil ditarik
+        container.innerHTML = data.map(item => {
+          const qty = table === 'barang_masuk' ? item.jumlah_masuk : item.jumlah_keluar;
+          const dateVal = table === 'barang_masuk' ? item.tanggal_masuk : item.tanggal_keluar;
+          const timeStr = dateVal ? new Date(dateVal).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '--:--';
+          
+          // Pengaman jika objek join barang atau nama_barang bernilai null
+          const namaBarangFix = item.barang?.nama_barang || 'Item Komoditas';
+          const badgeColor = table === 'barang_masuk' ? 'text-emerald-400 bg-emerald-950 border-emerald-900' : 'text-rose-400 bg-rose-950 border-rose-900';
+          const sign = table === 'barang_masuk' ? '+' : '-';
+
+          return `
+            <div class="bg-panel border border-slate-800 p-3 rounded-xl flex justify-between items-center text-[11px] hover:border-slate-700 transition-colors">
+              <div class="space-y-0.5">
+                <p class="font-semibold text-slate-200">${namaBarangFix}</p>
+                <p class="text-slate-500 font-mono text-[10px]">${timeStr} WIB • ${label}</p>
+              </div>
+              <span class="font-bold border px-2 py-0.5 rounded-lg text-xs ${badgeColor}">${sign}${qty}</span>
             </div>
-            <div class="flex-1 text-slate-300">
-              <span class="font-bold text-sky-400 capitalize">${fallbackName}</span> 
-              melakukan <span class="text-amber-400 font-medium">${displayAction}</span> 
-              <span class="font-semibold text-white">${log.barang?.nama_barang || 'Item'}</span> 
-              sebanyak <span class="font-bold text-emerald-400">${qty} unit</span>.
-            </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        }).join('');
+
+        console.log(`[DEBUG LOG SAMPING] Berhasil me-render ${data.length} baris log ke #${elementId}`);
+
+      } catch (err) {
+        console.error(`[DEBUG LOG SAMPING] Crash JavaScript internal di fungsi renderSideLog:`, err);
+      }
     }
 
     // ==========================================
@@ -816,16 +833,9 @@
         if (resKeluar.error) resKeluar = await supabase.from('barang_keluar').select('*').order('tanggal_keluar', { ascending: false });
         if (resOrder.error) resOrder = await supabase.from('orders').select('*').order('tanggal_order', { ascending: false });
 
-        // Tambahan Console Log Pelacak Data Mentah dari Supabase
-        console.log("[DEBUG ARSIP GLOBAL] Data mentah ditarik:", {
-          barang_masuk: resMasuk.data,
-          barang_keluar: resKeluar.data,
-          orders: resOrder.data
-        });
-
         let masterLogs = [];
 
-        // Gabungkan logs masuk menggunakan kolom tanggal_masuk asli
+        // 1. Gabungkan logs masuk
         resMasuk.data?.forEach(m => {
           masterLogs.push({
             timestamp: new Date(m.tanggal_masuk),
@@ -838,7 +848,7 @@
           });
         });
 
-        // Gabungkan logs keluar menggunakan kolom tanggal_keluar asli
+        // 2. Gabungkan logs keluar (Cukup Panggil Sekali Saja)
         resKeluar.data?.forEach(k => {
           masterLogs.push({
             timestamp: new Date(k.tanggal_keluar),
@@ -851,26 +861,13 @@
           });
         });
 
-        // Gabungkan logs keluar menggunakan kolom tanggal_keluar asli
-        resKeluar.data?.forEach(k => {
-          masterLogs.push({
-            timestamp: new Date(k.tanggal_keluar),
-            userId: k.packer_id,
-            barangName: k.barang?.nama_barang || 'Item Terhapus',
-            barangId: k.barang_id,
-            type: 'KELUAR',
-            qty: `-${k.jumlah_keluar}`,
-            color: 'text-rose-400'
-          });
-        });
-
-        // INJEKSI BARU: Gabungkan logs dari tabel orders (Procurement) ke Log Global
+        // 3. Gabungkan logs dari tabel orders (Procurement)
         resOrder.data?.forEach(o => {
           const isPending = o.status === 'Pending';
           masterLogs.push({
             timestamp: new Date(o.tanggal_order),
-            userId: null, // Fallback peran otomatis nanti di render
-            roleFallback: 'Admin Order',
+            userId: null, 
+            roleFallback: 'admin_order',
             barangName: o.barang?.nama_barang || 'Item Terhapus',
             barangId: o.barang_id,
             type: isPending ? 'PROCUREMENT (PENDING)' : 'PROCUREMENT (SELESAI)',
@@ -882,22 +879,18 @@
         // Urutkan berdasarkan waktu paling baru
         masterLogs.sort((a, b) => b.timestamp - a.timestamp);
 
-        // Tambahan Console Log Hasil Penggabungan Sebelum Filter Terpasang
-        console.log("[DEBUG ARSIP GLOBAL] Hasil kompilasi masterLogs awal:", masterLogs);
-
         // Petakan UUID ke role dari tabel user_roles
         const roleMap = {};
         resRoles.data?.forEach(r => { roleMap[r.user_id] = r.role; });
 
         let filtered = masterLogs.filter(log => {
-          if (filterConfig.barangId && log.barangId.toString() !== filterConfig.barangId) return false;
+          if (filterConfig.barangId && log.barangId?.toString() !== filterConfig.barangId) return false;
           if (filterConfig.date) {
-            // Evaluasi penanggalan sesuai format lokal komputer
-            const logDate = log.timestamp.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // Format YYYY-MM-DD
+            const logDate = log.timestamp.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); 
             if (logDate !== filterConfig.date) return false;
           }
           if (filterConfig.role) {
-            const currentRole = roleMap[log.userId] || 'system';
+            const currentRole = roleMap[log.userId] || log.roleFallback || 'system';
             if (currentRole !== filterConfig.role) return false;
           }
           return true;
@@ -909,18 +902,16 @@
         }
 
         tbody.innerHTML = filtered.map(log => {
-          // Fix: Konversi Waktu arsip utama ke format WIB Indonesia
           const formattedTime = log.timestamp.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jakarta' });
           
-          // Deteksi role secara dinamis berdasarkan tabel asalnya
-          const determinedRole = roleMap[log.userId] || (log.roleFallback ? 'admin_order' : 'system');
+          // FIX DETEKSI ROLE: Membaca roleFallback jika userId bernilai null (data procurement)
+          const determinedRole = roleMap[log.userId] || log.roleFallback || 'system';
           
-          // Tentukan display nama penginput
           let userDisplay = 'System';
           if (log.userId) {
             userDisplay = log.userId === currentUser.id ? getFirstName(currentUser.email) : 'Karyawan';
           } else if (log.roleFallback) {
-            userDisplay = 'Admin Order';
+            userDisplay = log.roleFallback === 'admin_order' ? 'Admin Order' : 'System';
           }
 
           return `
