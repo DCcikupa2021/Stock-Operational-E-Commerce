@@ -566,7 +566,7 @@
 
         Swal.fire({ title: 'Memeriksa Otorisasi Stok...', didOpen: () => Swal.showLoading() });
 
-        // A. Ambil data stok aktual barang saat ini
+        // A. Ambil data stok aktual & minimum barang saat ini
         const { data: targetBarang, error: errBarang } = await supabase
           .from('barang')
           .select('nama_barang, stok_actual, stok_minimum')
@@ -579,34 +579,34 @@
         }
 
         const sisaStokSetelahDiambil = (targetBarang.stok_actual || 0) - jumlah_keluar;
-        const batasMinimum = targetBarang.stok_minimum || 750;
+        const batasMinimum = targetBarang.stok_minimum || 0;
 
-        // B. Cek status kritis: Apakah pengambilan ini membuat stok berada di bawah batas minimum?
+        // B. JALANKAN BLOKIR UTAMA: Jika stok melorot di bawah limit minimum
         if (sisaStokSetelahDiambil < batasMinimum) {
           
-          // C. JIKA KRITIS: Cek apakah ada pipa Procurement berstatus 'Pending' untuk barang ini
-          const { data: pendingOrder } = await supabase
+          // C. Cek apakah ada order 'Pending' yang aktif untuk barang ini
+          const { data: pendingOrder, error: errOrder } = await supabase
             .from('orders')
             .select('id')
             .eq('barang_id', barang_id)
-            .eq('status', 'Pending')
-            .limit(1);
+            .eq('status', 'Pending');
 
-          // Jika tidak ada order pending sama sekali, KUNCI MATI AKSESNYA
-          if (!pendingOrder || pendingOrder.length === 0) {
+          // PENGAMAN KETAT: Jika error, bukan array, atau array-nya kosong (0), MAKA BLOKIR Keras!
+          if (errOrder || !Array.isArray(pendingOrder) || pendingOrder.length === 0) {
             Swal.fire({
               icon: 'error',
               title: 'AKSES DIBLOKIR: STOK KRITIS!',
-              html: `Item <b>${targetBarang.nama_barang}</b> telah menyentuh batas minimum aman (${batasMinimum} Pcs).<br><br>` +
+              html: `Item <b>${targetBarang.nama_barang}</b> saat ini berada di bawah batas minimum aman (${batasMinimum} Pcs).<br><br>` +
                     `<span class="text-xs text-amber-400 font-semibold">Silakan hubungi Admin Order untuk mengajukan pengadaan (Procurement) terlebih dahulu agar gembok sistem terbuka.</span>`,
               confirmButtonColor: '#e11d48'
             });
-            return;
+            return; // Hentikan eksekusi, jangan biarkan masuk ke proses potong stok
           }
-          console.log(`[BYPASS LOCK] Pengeluaran diizinkan karena terdeteksi order Pending.`);
+          
+          console.log(`[BYPASS SUCCESS] Gembok dilepas karena ada order Pending.`);
         }
 
-        // D. JALANKAN EKSEKUSI JIKA LOLOS VALIDASI
+        // D. PROSES EKSEKUSI POTONG STOK (Hanya jalan jika lolos validasi di atas)
         Swal.fire({ title: 'Evaluating Trigger Rules...', didOpen: () => Swal.showLoading() });
         const { error } = await supabase.from('barang_keluar').insert([{ barang_id, jumlah_keluar, packer_id }]);
         Swal.close();
