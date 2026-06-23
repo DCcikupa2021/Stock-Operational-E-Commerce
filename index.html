@@ -318,12 +318,12 @@
       async function loadData() {
         const listDiv = document.getElementById('dashboard-list');
         
-        // Tarik data paralel untuk performa kencang
+        // Tarik data paralel untuk performa kencang (FIX: ResOrder difilter hanya yang 'Pending')
         const [resBarang, resMasuk, resKeluar, resOrder] = await Promise.all([
           supabase.from('barang').select('*').order('nama_barang', { ascending: true }),
           supabase.from('barang_masuk').select('barang_id, jumlah_masuk'),
           supabase.from('barang_keluar').select('barang_id, jumlah_keluar'),
-          supabase.from('orders').select('barang_id, jumlah_order')
+          supabase.from('orders').select('barang_id, jumlah_order').eq('status', 'Pending')
         ]);
 
         if (resBarang.error) return listDiv.innerHTML = `<p class="p-4 text-xs text-rose-400">Gagal memuat matriks data.</p>`;
@@ -357,7 +357,7 @@
                   <span class="text-slate-700">|</span>
                   <span>Masuk: <span class="font-semibold text-emerald-400">${itemMasuk}</span></span>
                   <span>Keluar: <span class="font-semibold text-rose-400">${itemKeluar}</span></span>
-                  <span>Order: <span class="font-semibold text-sky-400">${itemOrder}</span></span>
+                  <span>Order (Pending): <span class="font-semibold text-sky-400">${itemOrder}</span></span>
                 </div>
               </div>
               <div class="text-left md:text-right flex md:flex-col justify-between items-center md:items-end border-t border-slate-800 md:border-none pt-2 md:pt-0">
@@ -555,7 +555,7 @@
       const { data: listBarang } = await query.order('nama_barang', { ascending: true });
       selectBarang.innerHTML = listBarang?.map(b => `<option value="${b.id}">${b.nama_barang}</option>`).join('') || '';
 
-      // Fix: Panggil log ringkasan saat halaman pertama dibuka
+      // Panggil log ringkasan saat halaman pertama dibuka
       renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
 
       document.getElementById('form-barang-keluar').addEventListener('submit', async (e) => {
@@ -564,6 +564,49 @@
         const jumlah_keluar = parseInt(document.getElementById('keluar-jumlah').value);
         const packer_id = currentUser.id;
 
+        Swal.fire({ title: 'Memeriksa Otorisasi Stok...', didOpen: () => Swal.showLoading() });
+
+        // A. Ambil data stok aktual barang saat ini
+        const { data: targetBarang, error: errBarang } = await supabase
+          .from('barang')
+          .select('nama_barang, stok_actual, stok_minimum')
+          .eq('id', barang_id)
+          .single();
+
+        if (errBarang || !targetBarang) {
+          Swal.fire({ icon: 'error', title: 'Gagal', text: 'Gagal memverifikasi master komoditas.' });
+          return;
+        }
+
+        const sisaStokSetelahDiambil = (targetBarang.stok_actual || 0) - jumlah_keluar;
+        const batasMinimum = targetBarang.stok_minimum || 750;
+
+        // B. Cek status kritis: Apakah pengambilan ini membuat stok berada di bawah batas minimum?
+        if (sisaStokSetelahDiambil < batasMinimum) {
+          
+          // C. JIKA KRITIS: Cek apakah ada pipa Procurement berstatus 'Pending' untuk barang ini
+          const { data: pendingOrder } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('barang_id', barang_id)
+            .eq('status', 'Pending')
+            .limit(1);
+
+          // Jika tidak ada order pending sama sekali, KUNCI MATI AKSESNYA
+          if (!pendingOrder || pendingOrder.length === 0) {
+            Swal.fire({
+              icon: 'error',
+              title: 'AKSES DIBLOKIR: STOK KRITIS!',
+              html: `Item <b>${targetBarang.nama_barang}</b> telah menyentuh batas minimum aman (${batasMinimum} Pcs).<br><br>` +
+                    `<span class="text-xs text-amber-400 font-semibold">Silakan hubungi Admin Order untuk mengajukan pengadaan (Procurement) terlebih dahulu agar gembok sistem terbuka.</span>`,
+              confirmButtonColor: '#e11d48'
+            });
+            return;
+          }
+          console.log(`[BYPASS LOCK] Pengeluaran diizinkan karena terdeteksi order Pending.`);
+        }
+
+        // D. JALANKAN EKSEKUSI JIKA LOLOS VALIDASI
         Swal.fire({ title: 'Evaluating Trigger Rules...', didOpen: () => Swal.showLoading() });
         const { error } = await supabase.from('barang_keluar').insert([{ barang_id, jumlah_keluar, packer_id }]);
         Swal.close();
@@ -574,7 +617,6 @@
         } else {
           Swal.fire({ icon: 'success', title: 'Outbound Berhasil', text: 'Stok dipotong, barang siap dipacking.', showConfirmButton: false, timer: 1800 });
           document.getElementById('form-barang-keluar').reset();
-          // Fix: Segarkan log ringkasan kanan setelah input sukses
           renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
         }
       });
@@ -610,13 +652,13 @@
           </div>
 
           <div class="md:col-span-3 space-y-3">
-            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Procurement & Supply Activity Log</h3>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Procurement Active Pipeline (Pending)</h3>
             <div id="order-list" class="space-y-2"></div>
           </div>
         </div>
       `;
 
-      // AMANKAN EVENT LISTENER DI SINI (Langsung pasang setelah HTML disuntik)
+      // AMANKAN EVENT LISTENER DI SINI
       const formOrder = document.getElementById('form-order');
       if (formOrder) {
         formOrder.addEventListener('submit', async (e) => {
@@ -654,23 +696,28 @@
         const orderListDiv = document.getElementById('order-list');
         if (!orderListDiv) return; // Proteksi navigasi menu SPA
         
-        const { data: orders } = await supabase.from('orders').select('*, barang(nama_barang)').order('tanggal_order', { ascending: false });
+        // FIX: Hanya tarik data order yang berstatus 'Pending' untuk antrean aktif di web
+        const { data: orders } = await supabase
+          .from('orders')
+          .select('*, barang(nama_barang)')
+          .eq('status', 'Pending')
+          .order('tanggal_order', { ascending: false });
         
         if (!orders || orders.length === 0) {
-          orderListDiv.innerHTML = `<div class="bg-panel border border-slate-800 p-6 text-center text-xs text-slate-500 rounded-xl">Tidak ada aktivitas order/procurement.</div>`;
+          orderListDiv.innerHTML = `<div class="bg-panel border border-slate-800 p-6 text-center text-xs text-slate-500 rounded-xl">Tidak ada aktivitas order yang tertunda (0 Pending).</div>`;
           return;
         }
 
         orderListDiv.innerHTML = orders.map(o => {
           const isPending = o.status === 'Pending';
-          const badgeStyle = isPending ? 'bg-amber-950 border-amber-800 text-amber-400' : 'bg-emerald-950 border-emerald-800 text-emerald-400';
+          const badgeStyle = 'bg-amber-950 border-amber-800 text-amber-400';
           const namaBarangFix = o.barang?.nama_barang || 'Item Komoditas';
 
           return `
             <div class="bg-panel border border-slate-800 p-4 rounded-xl flex justify-between items-center text-xs">
               <div class="space-y-1">
                 <p class="font-bold text-slate-200 text-sm">${namaBarangFix}</p>
-                <p class="text-slate-400">Volume Permintaan: <span class="font-bold ${isPending ? 'text-accent' : 'text-emerald-400'}">${o.jumlah_order} Pcs</span></p>
+                <p class="text-slate-400">Volume Permintaan: <span class="font-bold text-accent">${o.jumlah_order} Pcs</span></p>
                 <p class="text-[11px] text-slate-500 italic flex items-center gap-1 mt-0.5">
                   <i class="fa-solid fa-comment-dots text-slate-600"></i>
                   <span>${o.remarks || 'Tanpa catatan'}</span>
@@ -697,7 +744,6 @@
         });
       }
 
-      // Jalankan load data
       loadOrders();
     }
 
