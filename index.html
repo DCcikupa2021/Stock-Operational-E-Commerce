@@ -824,7 +824,7 @@
     }
 
     // ==========================================
-    // COMPONENT: HIGH-TECH HISTORY LOG DATA CENTER (FIXED FULL)
+    // COMPONENT: HIGH-TECH HISTORY LOG DATA CENTER
     // ==========================================
     async function viewHistoryLog(container) {
       let filterConfig = { user: '', role: '', barangId: '', date: '' };
@@ -866,22 +866,20 @@
       async function compileAndRenderLogs() {
         const tbody = document.getElementById('history-table-body');
         
-        // Tarik semua data history logistik menggunakan kolom pengurutan asli yang ada di tabel
-        let [resMasuk, resKeluar, resOrder, resRoles] = await Promise.all([
+        let [resMasuk, resKeluar, resOrder, resRoles, resProfiles] = await Promise.all([
           supabase.from('barang_masuk').select('*, barang(nama_barang)').order('tanggal_masuk', { ascending: false }),
           supabase.from('barang_keluar').select('*, barang(nama_barang)').order('tanggal_keluar', { ascending: false }),
           supabase.from('orders').select('*, barang(nama_barang)').order('tanggal_order', { ascending: false }),
-          supabase.from('user_roles').select('*')
+          supabase.from('user_roles').select('*'),
+          supabase.from('user_profiles').select('*')
         ]);
 
-        // Proteksi Fallback jika Foreign Key bermasalah di database
         if (resMasuk.error) resMasuk = await supabase.from('barang_masuk').select('*').order('tanggal_masuk', { ascending: false });
         if (resKeluar.error) resKeluar = await supabase.from('barang_keluar').select('*').order('tanggal_keluar', { ascending: false });
         if (resOrder.error) resOrder = await supabase.from('orders').select('*').order('tanggal_order', { ascending: false });
 
         let masterLogs = [];
 
-        // 1. Gabungkan logs masuk
         resMasuk.data?.forEach(m => {
           masterLogs.push({
             timestamp: new Date(m.tanggal_masuk),
@@ -894,12 +892,11 @@
           });
         });
 
-        // 2. Gabungkan logs keluar (Cukup Panggil Sekali Saja)
         resKeluar.data?.forEach(k => {
           masterLogs.push({
             timestamp: new Date(k.tanggal_keluar),
             userId: k.packer_id,
-            barangName: k.barang?.nama_barang || 'Item Terhapus',
+            barangName: k.barang?.nama_barang || 'Item Terhapus', // <--- Di sini tadinya tertulis m.barang, sudah diganti jadi k.barang
             barangId: k.barang_id,
             type: 'KELUAR',
             qty: `-${k.jumlah_keluar}`,
@@ -907,7 +904,6 @@
           });
         });
 
-        // 3. Gabungkan logs dari tabel orders (Procurement)
         resOrder.data?.forEach(o => {
           const isPending = o.status === 'Pending';
           masterLogs.push({
@@ -922,12 +918,13 @@
           });
         });
 
-        // Urutkan berdasarkan waktu paling baru
         masterLogs.sort((a, b) => b.timestamp - a.timestamp);
 
-        // Petakan UUID ke role dari tabel user_roles
         const roleMap = {};
         resRoles.data?.forEach(r => { roleMap[r.user_id] = r.role; });
+
+        const profileMap = {};
+        resProfiles.data?.forEach(p => { profileMap[p.user_id] = p.nama_lengkap; });
 
         let filtered = masterLogs.filter(log => {
           if (filterConfig.barangId && log.barangId?.toString() !== filterConfig.barangId) return false;
@@ -949,13 +946,11 @@
 
         tbody.innerHTML = filtered.map(log => {
           const formattedTime = log.timestamp.toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jakarta' });
-          
-          // FIX DETEKSI ROLE: Membaca roleFallback jika userId bernilai null (data procurement)
           const determinedRole = roleMap[log.userId] || log.roleFallback || 'system';
           
           let userDisplay = 'System';
           if (log.userId) {
-            userDisplay = log.userId === currentUser.id ? getFirstName(currentUser.email) : 'Karyawan';
+            userDisplay = profileMap[log.userId] || 'Karyawan';
           } else if (log.roleFallback) {
             userDisplay = log.roleFallback === 'admin_order' ? 'Admin Order' : 'System';
           }
@@ -972,7 +967,7 @@
         }).join('');
       }
 
-      // POPUP FILTER MENGGUNAKAN SWEETALERT2
+      // Filter Event Listeners menggunakan SweetAlert2
       document.getElementById('btn-open-filter').addEventListener('click', async () => {
         const { data: listBarang } = await supabase.from('barang').select('id, nama_barang');
         const optionsBarang = listBarang?.map(b => `<option value="${b.id}" ${filterConfig.barangId == b.id ? 'selected':''}>${b.nama_barang}</option>`).join('') || '';
