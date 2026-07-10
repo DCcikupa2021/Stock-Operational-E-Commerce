@@ -109,10 +109,12 @@
       if (!currentUser) return renderLogin();
 
       const rolesConfig = {
+        // Buka semua akses halaman untuk super_admin, admin_gudang, dan admin_order
         super_admin: ['#dashboard', '#barang', '#barang-masuk', '#barang-keluar', '#orders', '#history'],
-        packer: ['#dashboard', '#barang-keluar'],
-        admin_gudang: ['#dashboard', '#barang-masuk'],
-        admin_order: ['#dashboard', '#orders']
+        admin_gudang: ['#dashboard', '#barang', '#barang-masuk', '#barang-keluar', '#orders', '#history'],
+        admin_order: ['#dashboard', '#barang', '#barang-masuk', '#barang-keluar', '#orders', '#history'],
+        // Packer tetap dibatasi hanya Dashboard dan Stock Out
+        packer: ['#dashboard', '#barang-keluar']
       };
 
       if (!rolesConfig[userRole].includes(currentHash)) {
@@ -152,11 +154,11 @@
     function renderLayout() {
       const menuItems = [
         { hash: '#dashboard', label: 'Dashboard', icon: 'fa-chart-pie', roles: ['super_admin', 'packer', 'admin_gudang', 'admin_order'] },
-        { hash: '#barang', label: 'Master Item', icon: 'fa-box', roles: ['super_admin'] },
-        { hash: '#barang-masuk', label: 'Stock In', icon: 'fa-arrow-down-long', roles: ['super_admin', 'admin_gudang'] },
-        { hash: '#barang-keluar', label: 'Stock Out', icon: 'fa-arrow-up-long', roles: ['super_admin', 'packer'] },
-        { hash: '#orders', label: 'Procurement', icon: 'fa-file-signature', roles: ['super_admin', 'admin_order'] },
-        { hash: '#history', label: 'History Log', icon: 'fa-clock-rotate-left', roles: ['super_admin'] }
+        { hash: '#barang', label: 'Master Item', icon: 'fa-box', roles: ['super_admin', 'admin_gudang', 'admin_order'] },
+        { hash: '#barang-masuk', label: 'Stock In', icon: 'fa-arrow-down-long', roles: ['super_admin', 'admin_gudang', 'admin_order'] },
+        { hash: '#barang-keluar', label: 'Stock Out', icon: 'fa-arrow-up-long', roles: ['super_admin', 'packer', 'admin_gudang', 'admin_order'] },
+        { hash: '#orders', label: 'Procurement', icon: 'fa-file-signature', roles: ['super_admin', 'admin_gudang', 'admin_order'] },
+        { hash: '#history', label: 'History Log', icon: 'fa-clock-rotate-left', roles: ['super_admin', 'admin_gudang', 'admin_order'] }
       ];
 
       const visibleMenus = menuItems.filter(item => item.roles.includes(userRole));
