@@ -384,13 +384,20 @@
     // COMPONENT: FORM INPUT DATA MASTER BARANG
     // ==========================================
     function viewBarang(container) {
+      console.log("[DEBUG MASTER] Menjalankan fungsi viewBarang(). Memasang UI komponen...");
+      
       container.innerHTML = `
-        <div class="mb-6">
-          <h2 class="text-2xl font-bold text-white tracking-tight">Katalog Induk Master</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Daftarkan SKU baru ke dalam logistik sistem.</p>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-white">Katalog Induk Master</h2>
+            <p class="text-sm text-slate-400">Daftarkan SKU baru ke dalam logistik sistem.</p>
+          </div>
+          <button id="btn-list-barang" class="w-full sm:w-auto px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition-all border border-slate-600">
+            <i class="fa-solid fa-boxes-stacked text-accent"></i> Lihat Daftar SKU
+          </button>
         </div>
         
-        <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl max-w-xl">
+        <div class="bg-panel border border-slate-800 rounded-2xl p-6 shadow-xl max-w-xl mt-4">
           <form id="form-add-barang" class="space-y-4">
             <div>
               <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Nama Deskripsi Barang</label>
@@ -418,6 +425,134 @@
         </div>
       `;
 
+      // EVENT LISTENER: Tombol Lihat Daftar SKU (Pop-up Modal Premium + Fitur Hapus)
+      document.getElementById('btn-list-barang').addEventListener('click', async () => {
+        console.log("[DEBUG MASTER] Tombol 'Lihat Daftar SKU' diklik. Memulai request ke Supabase...");
+        Swal.fire({ title: 'Memuat Daftar SKU...', didOpen: () => Swal.showLoading() });
+        
+        const { data: listBarang, error } = await supabase.from('barang').select('*').order('nama_barang', { ascending: true });
+        Swal.close();
+
+        console.log("[DEBUG MASTER] Respons dari tabel barang:", { data: listBarang, error });
+
+        if (error) {
+          console.error("[DEBUG MASTER ERROR] Gagal mengambil data master item:", error);
+          Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+          return;
+        }
+
+        if (!listBarang || listBarang.length === 0) {
+          console.warn("[DEBUG MASTER WARNING] Data master item kosong di database.");
+          Swal.fire({ icon: 'info', title: 'Kosong', text: 'Belum ada data SKU terdaftar.' });
+          return;
+        }
+
+        // Susun HTML baris tabel beserta tombol aksi hapus
+        let tableRows = listBarang.map((b, index) => {
+          const stokSekarang = b.stok_actual !== undefined ? b.stok_actual : 0;
+          const safetyLimit = b.stok_minimum !== undefined ? b.stok_minimum : 0;
+          const isKritis = stokSekarang <= safetyLimit;
+          const kategoriDisplay = b.category || b.kategori || 'N/A';
+
+          return `
+            <tr class="border-b border-slate-800 hover:bg-slate-800/30 text-left text-xs">
+              <td class="p-3 text-slate-400 text-center">${index + 1}</td>
+              <td class="p-3 font-semibold text-slate-200">${b.nama_barang}</td>
+              <td class="p-3 uppercase text-[10px] tracking-wider text-slate-400">${kategoriDisplay}</td>
+              <td class="p-3 font-bold text-center ${isKritis ? 'text-amber-400' : 'text-emerald-400'}">${stokSekarang}</td>
+              <td class="p-3 text-center text-slate-400">${safetyLimit}</td>
+              <td class="p-3 text-center">
+                <button class="text-slate-500 hover:text-rose-400 transition-colors btn-delete-sku p-1" data-id="${b.id}" data-name="${b.nama_barang}">
+                  <i class="fa-solid fa-trash-can text-xs"></i>
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        // Tampilkan jendela modal SweetAlert2
+        Swal.fire({
+          title: '<span class="text-sm font-bold tracking-wider uppercase text-slate-300">Daftar SKU Master</span>',
+          html: `
+            <div class="overflow-x-auto max-h-[400px] no-scrollbar rounded-xl border border-slate-800 bg-vdark mt-2">
+              <table class="w-full border-collapse">
+                <thead>
+                  <tr class="bg-slate-900 border-b border-slate-800 text-left text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    <th class="p-3 text-center w-12">No</th>
+                    <th class="p-3">Nama Barang</th>
+                    <th class="p-3">Kategori</th>
+                    <th class="p-3 text-center">Stok</th>
+                    <th class="p-3 text-center">Safety</th>
+                    <th class="p-3 text-center w-16">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${tableRows}
+                </tbody>
+              </table>
+            </div>
+          `,
+          width: '700px',
+          background: '#1e293b',
+          customClass: { popup: 'border border-slate-700' },
+          confirmButtonText: 'Tutup',
+          confirmButtonColor: '#475569',
+          didOpen: () => {
+            console.log("[DEBUG MASTER] Modal SKU terbuka. Menginisialisasi event klik tombol hapus...");
+            
+            // Pasang event listener ke setiap ikon tempat sampah di dalam modal pop-up
+            document.querySelectorAll('.btn-delete-sku').forEach(btn => {
+              btn.addEventListener('click', function() {
+                const skuId = this.getAttribute('data-id');
+                const skuName = this.getAttribute('data-name');
+
+                console.log(`[DEBUG MASTER] Ingin menghapus SKU. ID: ${skuId} | Nama: ${skuName}`);
+
+                Swal.fire({
+                  title: 'Hapus SKU Master?',
+                  text: `Apakah Anda yakin ingin menghapus master item "${skuName}"? Seluruh riwayat transaksi (In/Out) yang bergantung pada item ini mungkin akan ikut terdampak.`,
+                  icon: 'warning',
+                  showCancelButton: true,
+                  background: '#1e293b',
+                  confirmButtonColor: '#f43f5e',
+                  cancelButtonColor: '#475569',
+                  confirmButtonText: 'Ya, Hapus Item!',
+                  cancelButtonText: 'Batal'
+                }).then(async (result) => {
+                  if (result.isConfirmed) {
+                    console.log(`[DEBUG MASTER] Konfirmasi hapus disetujui untuk ID: ${skuId}`);
+                    Swal.fire({ title: 'Menghapus Item dari Database...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                    
+                    // Eksekusi hapus baris di tabel 'barang' Supabase
+                    const { error: errDelete } = await supabase.from('barang').delete().eq('id', skuId);
+                    Swal.close();
+
+                    if (errDelete) {
+                      console.error("[DEBUG MASTER ERROR] Gagal menghapus SKU dari database:", errDelete);
+                      Swal.fire({ icon: 'error', title: 'Gagal Menghapus', text: errDelete.message });
+                    } else {
+                      console.log(`[DEBUG MASTER SUCCESS] SKU ID ${skuId} berhasil dihapus.`);
+                      
+                      // Tutup popup daftar tabel terlebih dahulu agar tidak menumpuk di memori browser
+                      Swal.close(); 
+                      
+                      // Tampilkan alert sukses sebentar
+                      Swal.fire({ icon: 'success', title: 'Terhapus', text: 'Item berhasil dihapus dari master katalog.', timer: 1200, showConfirmButton: false });
+                      
+                      // Muat ulang UI Dashboard utama agar item yang terhapus langsung hilang dari layar
+                      setTimeout(() => {
+                        viewBarang(container);
+                      }, 1200);
+                    }
+                  }
+                });
+              });
+            });
+          }
+        });
+      });
+
+      // EVENT LISTENER: Submit Form Simpan Barang (Sama seperti bawaan kamu)
       document.getElementById('form-add-barang').addEventListener('submit', async (e) => {
         e.preventDefault();
         const nama_barang = document.getElementById('m-nama').value;
@@ -425,24 +560,29 @@
         const stok_actual = parseInt(document.getElementById('m-stok').value);
         const stok_minimum = parseInt(document.getElementById('m-min').value);
 
+        console.log("[DEBUG MASTER] Mengirim data pendaftaran SKU baru:", { nama_barang, category, stok_actual, stok_minimum });
+
         Swal.fire({ title: 'Processing DB...', didOpen: () => Swal.showLoading() });
         const { error } = await supabase.from('barang').insert([{ nama_barang, category, stok_actual, stok_minimum }]);
         Swal.close();
 
         if (error) {
+          console.error("[DEBUG MASTER ERROR] Gagal menyimpan data SKU baru:", error);
           Swal.fire({ icon: 'error', title: 'DB Error', text: error.message });
         } else {
+          console.log("[DEBUG MASTER SUCCESS] SKU baru berhasil didaftarkan ke Supabase.");
           Swal.fire({ icon: 'success', title: 'Data Saved', text: 'Item baru berhasil didaftarkan.', showConfirmButton: false, timer: 1500 });
           document.getElementById('form-add-barang').reset();
         }
       });
     }
 
+
     // ==========================================
     // COMPONENT: FORM BARANG MASUK (STOCK IN)
     // ==========================================
     async function viewBarangMasuk(container) {
-      // 1. Suntik susunan HTML utama ke container panel
+      // 1. Suntik susunan HTML utama ke container panel (Sudah ditambah input datetime-local)
       container.innerHTML = `
         <div class="mb-6">
           <h2 class="text-2xl font-bold text-white tracking-tight">Stock Inbound</h2>
@@ -459,6 +599,10 @@
               <div>
                 <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Jumlah Kuantitas Masuk</label>
                 <input type="number" id="masuk-jumlah" min="1" placeholder="Masukkan jumlah unit" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Tanggal & Waktu Masuk</label>
+                <input type="datetime-local" id="masuk-tanggal" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
               </div>
               <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">SUBMIT INBOUND</button>
             </form>
@@ -486,15 +630,24 @@
           
           const barang_id = document.getElementById('masuk-barang-id').value;
           const jumlah_masuk = parseInt(document.getElementById('masuk-jumlah').value);
+          const tanggal_masuk = document.getElementById('masuk-tanggal').value; // Ambil nilai tanggal kustom dari input
           const admin_id = currentUser?.id;
 
-          if (!barang_id || !jumlah_masuk) {
+          if (!barang_id || !jumlah_masuk || !tanggal_masuk) {
             Swal.fire({ icon: 'error', title: 'Gagal', text: 'Data input tidak valid.' });
             return;
           }
 
           Swal.fire({ title: 'Updating Ledger...', didOpen: () => Swal.showLoading() });
-          const { error } = await supabase.from('barang_masuk').insert([{ barang_id, jumlah_masuk, admin_id }]);
+          
+          // Memasukkan data ke database dengan menyertakan tanggal kustom pilihan user
+          const { error } = await supabase.from('barang_masuk').insert([{ 
+            barang_id, 
+            jumlah_masuk, 
+            admin_id,
+            tanggal_masuk // Menyimpan tanggal kustom ke database
+          }]);
+          
           Swal.close();
 
           if (error) {
@@ -540,6 +693,10 @@
                 <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Qty</label>
                 <input type="number" id="keluar-jumlah" min="1" placeholder="Masukkan jumlah unit" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
               </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Pilih Tanggal & Waktu Keluar</label>
+                <input type="datetime-local" id="keluar-tanggal" required class="w-full bg-vdark border border-slate-700 p-3 rounded-xl text-sm text-white focus:outline-none focus:border-accent">
+              </div>
               <button type="submit" class="w-full bg-slate-800 hover:bg-slate-700 text-rose-400 font-bold border border-slate-700 py-3.5 rounded-xl text-sm tracking-wide transition-all active:scale-[0.98]">Confirm</button>
             </form>
           </div>
@@ -560,68 +717,166 @@
       // Panggil log ringkasan saat halaman pertama dibuka
       renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
 
-      document.getElementById('form-barang-keluar').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const barang_id = selectBarang.value;
-        const jumlah_keluar = parseInt(document.getElementById('keluar-jumlah').value);
-        const packer_id = currentUser.id;
+      // PERBAIKAN: Bungkus dengan pengecekan aman agar tidak crash properti null
+      const formKeluar = document.getElementById('form-barang-keluar');
+      if (formKeluar) {
+        formKeluar.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const barang_id = selectBarang.value;
+          const jumlah_keluar = parseInt(document.getElementById('keluar-jumlah').value);
+          const tanggal_keluar = document.getElementById('keluar-tanggal').value; // Mengambil value tanggal kustom
+          const user_id_pelaksana = currentUser.id;
 
-        Swal.fire({ title: 'Memeriksa Otorisasi Stok...', didOpen: () => Swal.showLoading() });
+          Swal.fire({ title: 'Memeriksa Otorisasi Stok...', didOpen: () => Swal.showLoading() });
 
-        // A. Ambil data stok aktual & minimum barang saat ini
-        const { data: targetBarang, error: errBarang } = await supabase
-          .from('barang')
-          .select('nama_barang, stok_actual, stok_minimum')
-          .eq('id', barang_id)
-          .single();
+          // A. Ambil data stok aktual & minimum barang saat ini
+          const { data: targetBarang, error: errBarang } = await supabase
+            .from('barang')
+            .select('nama_barang, stok_actual, stok_minimum')
+            .eq('id', barang_id)
+            .single();
 
-        if (errBarang || !targetBarang) {
-          Swal.fire({ icon: 'error', title: 'Gagal', text: 'Gagal memverifikasi master komoditas.' });
-          return;
-        }
-
-        const sisaStokSetelahDiambil = (targetBarang.stok_actual || 0) - jumlah_keluar;
-        const batasMinimum = targetBarang.stok_minimum || 0;
-
-        // B. JALANKAN BLOKIR UTAMA: Jika stok melorot di bawah limit minimum
-        if (sisaStokSetelahDiambil < batasMinimum) {
-          
-          // C. Cek apakah ada order 'Pending' yang aktif untuk barang ini
-          const { data: pendingOrder, error: errOrder } = await supabase
-            .from('orders')
-            .select('id')
-            .eq('barang_id', barang_id)
-            .eq('status', 'Pending');
-
-          // PENGAMAN KETAT: Jika error, bukan array, atau array-nya kosong (0), MAKA BLOKIR Keras!
-          if (errOrder || !Array.isArray(pendingOrder) || pendingOrder.length === 0) {
-            Swal.fire({
-              icon: 'error',
-              title: 'AKSES DIBLOKIR: STOK KRITIS!',
-              html: `Item <b>${targetBarang.nama_barang}</b> saat ini berada di bawah batas minimum aman (${batasMinimum} Pcs).<br><br>` +
-                    `<span class="text-xs text-amber-400 font-semibold">Silakan hubungi Admin Order untuk mengajukan pengadaan (Procurement) terlebih dahulu agar gembok sistem terbuka.</span>`,
-              confirmButtonColor: '#e11d48'
-            });
-            return; // Hentikan eksekusi, jangan biarkan masuk ke proses potong stok
+          if (errBarang || !targetBarang) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: 'Gagal memverifikasi master komoditas.' });
+            return;
           }
-          
-          console.log(`[BYPASS SUCCESS] Gembok dilepas karena ada order Pending.`);
-        }
 
-        // D. PROSES EKSEKUSI POTONG STOK (Hanya jalan jika lolos validasi di atas)
-        Swal.fire({ title: 'Evaluating Trigger Rules...', didOpen: () => Swal.showLoading() });
-        const { error } = await supabase.from('barang_keluar').insert([{ barang_id, jumlah_keluar, packer_id }]);
-        Swal.close();
+          const sisaStokSetelahDiambil = (targetBarang.stok_actual || 0) - jumlah_keluar;
+          const batasMinimum = targetBarang.stok_minimum || 0;
 
-        if (error) {
-          const msg = error.message.includes('Ditolak') ? error.message : "Ditolak: Ketersediaan stok fisik di rak tidak mencukupi.";
-          Swal.fire({ icon: 'error', title: 'TRANSAKSI BLOCKER', text: msg, confirmButtonColor: '#f43f5e' });
-        } else {
-          Swal.fire({ icon: 'success', title: 'Outbound Berhasil', text: 'Stok dipotong, barang siap dipacking.', showConfirmButton: false, timer: 1800 });
-          document.getElementById('form-barang-keluar').reset();
-          renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
-        }
-      });
+          // B. JALANKAN BLOKIR UTAMA: Jika stok melorot di bawah limit minimum
+          if (sisaStokSetelahDiambil < batasMinimum) {
+            
+            // C. Cek apakah ada order 'Pending' yang aktif untuk barang ini
+            const { data: pendingOrder, error: errOrder } = await supabase
+              .from('orders')
+              .select('id')
+              .eq('barang_id', barang_id)
+              .eq('status', 'Pending');
+
+            // PENGAMAN KETAT: Jika error, bukan array, atau array-nya kosong (0), MAKA BLOKIR Keras!
+            if (errOrder || !Array.isArray(pendingOrder) || pendingOrder.length === 0) {
+              Swal.fire({
+                icon: 'error',
+                title: 'AKSES DIBLOKIR: STOK KRITIS!',
+                html: `Item <b>${targetBarang.nama_barang}</b> saat ini berada di bawah batas minimum aman (${batasMinimum} Pcs).<br><br>` +
+                      `<span class="text-xs text-amber-400 font-semibold">Silakan hubungi Admin Order untuk mengajukan pengadaan (Procurement) terlebih dahulu agar gembok sistem terbuka.</span>`,
+                confirmButtonColor: '#e11d48'
+              });
+              return; // Hentikan eksekusi, jangan biarkan masuk ke proses potong stok
+            }
+            
+            console.log(`[BYPASS SUCCESS] Gembok dilepas karena ada order Pending.`);
+          }
+
+          // D. PROSES EKSEKUSI POTONG STOK (Hanya jalan jika lolos validasi di atas)
+          Swal.fire({ title: 'Evaluating Trigger Rules...', didOpen: () => Swal.showLoading() });
+          const { error } = await supabase.from('barang_keluar').insert([{ barang_id, jumlah_keluar, packer_id: user_id_pelaksana, tanggal_keluar }]);
+          Swal.close();
+
+          if (error) {
+            const msg = error.message.includes('Ditolak') ? error.message : "Ditolak: Ketersediaan stok fisik di rak tidak mencukupi.";
+            Swal.fire({ icon: 'error', title: 'TRANSAKSI BLOCKER', text: msg, confirmButtonColor: '#f43f5e' });
+          } else {
+            Swal.fire({ icon: 'success', title: 'Outbound Berhasil', text: 'Stok dipotong, barang siap dipacking.', showConfirmButton: false, timer: 1800 });
+            formKeluar.reset();
+            renderSideLog('barang_keluar', 'side-log-keluar', 'Outbound');
+          }
+        });
+      }
+
+      // Menampilkan Pop-up List Barang & Aksi Hapus (Bawaan asli dipertahankan)
+      const btnListBarang = document.getElementById('btn-list-barang');
+      if (btnListBarang) {
+        btnListBarang.addEventListener('click', async () => {
+          Swal.fire({
+            title: 'Memuat Data...',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+          });
+
+          const { data: listBarang, error } = await supabase.from('barang').select('*').order('nama_barang', { ascending: true });
+          Swal.close();
+
+          if (error) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+            return;
+          }
+
+          let tableContent = `
+            <div class="overflow-x-auto max-h-96 text-left">
+              <table class="w-full text-sm text-slate-300">
+                <thead class="text-xs uppercase bg-vdark text-slate-400 sticky top-0">
+                  <tr>
+                    <th class="p-3">Nama Barang / SKU</th>
+                    <th class="p-3">Deskripsi</th>
+                    <th class="p-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-700">
+          `;
+
+          if (listBarang.length === 0) {
+            tableContent += `<tr><td colspan="3" class="p-4 text-center text-slate-500">Belum ada master barang diinput.</td></tr>`;
+          } else {
+            listBarang.forEach(b => {
+              tableContent += `
+                <tr class="hover:bg-slate-700/50">
+                  <td class="p-3 font-medium text-white">${b.nama_barang}</td>
+                  <td class="p-3 text-slate-400 text-xs">${b.deskripsi || '-'}</td>
+                  <td class="p-3 text-center">
+                    <button class="text-rose-400 hover:text-rose-600 btn-del-barang p-1" data-id="${b.id}" data-name="${b.nama_barang}">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </td>
+                </tr>
+              `;
+            });
+          }
+          tableContent += `</tbody></table></div>`;
+
+          Swal.fire({
+            title: '<span class="text-white text-lg font-bold">Daftar Master Item</span>',
+            html: tableContent,
+            background: '#1e293b',
+            customClass: { popup: 'border border-slate-700' },
+            showConfirmButton: true,
+            confirmButtonText: 'Tutup',
+            confirmButtonColor: '#475569',
+            width: '600px',
+            didOpen: () => {
+              document.querySelectorAll('.btn-del-barang').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                  const bId = btn.getAttribute('data-id');
+                  const bName = btn.getAttribute('data-name');
+                  
+                  Swal.fire({
+                    title: 'Hapus Master Item?',
+                    text: `Apakah Anda yakin ingin menghapus "${bName}"? Semua riwayat terkait mungkin akan ikut terpengaruh.`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    background: '#1e293b',
+                    confirmButtonColor: '#f43f5e',
+                    cancelButtonColor: '#475569',
+                    confirmButtonText: 'Ya, Hapus!',
+                    cancelButtonText: 'Batal'
+                  }).then(async (res) => {
+                    if (res.isConfirmed) {
+                      const { error: delErr } = await supabase.from('barang').delete().eq('id', bId);
+                      if (delErr) {
+                        Swal.fire({ icon: 'error', title: 'Gagal Hapus', text: delErr.message });
+                      } else {
+                        Swal.fire({ icon: 'success', title: 'Terhapus', text: 'Barang berhasil dihapus dari sistem.', timer: 1500, showConfirmButton: false });
+                        viewBarangKeluar(container);
+                      }
+                    }
+                  });
+                });
+              });
+            }
+          });
+        });
+      }
     }
 
     // ==========================================
@@ -884,6 +1139,7 @@
 
         resMasuk.data?.forEach(m => {
           masterLogs.push({
+            id: m.id, // Menyimpan id log
             timestamp: new Date(m.tanggal_masuk),
             userId: m.admin_id,
             barangName: m.barang?.nama_barang || 'Item Terhapus',
@@ -896,9 +1152,10 @@
 
         resKeluar.data?.forEach(k => {
           masterLogs.push({
+            id: k.id, // Menyimpan id log penting untuk aksi hapus
             timestamp: new Date(k.tanggal_keluar),
             userId: k.packer_id,
-            barangName: k.barang?.nama_barang || 'Item Terhapus', // <--- Di sini tadinya tertulis m.barang, sudah diganti jadi k.barang
+            barangName: k.barang?.nama_barang || 'Item Terhapus',
             barangId: k.barang_id,
             type: 'KELUAR',
             qty: `-${k.jumlah_keluar}`,
@@ -909,6 +1166,7 @@
         resOrder.data?.forEach(o => {
           const isPending = o.status === 'Pending';
           masterLogs.push({
+            id: o.id, // Menyimpan id log
             timestamp: new Date(o.tanggal_order),
             userId: null, 
             roleFallback: 'admin_order',
@@ -963,10 +1221,81 @@
               <td class="p-4 font-semibold text-white capitalize">${userDisplay}</td>
               <td class="p-4"><span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400">${determinedRole.replace('_', ' ')}</span></td>
               <td class="p-4 text-slate-200 font-medium">${log.barangName}</td>
-              <td class="p-4 text-right font-bold ${log.color}">${log.qty} <span class="text-[9px] text-slate-500 font-normal">${log.type}</span></td>
+              <td class="p-4 text-right font-bold ${log.color}">
+                <div class="flex items-center justify-end gap-3">
+                  <div>
+                    ${log.qty} <span class="text-[9px] text-slate-500 font-normal block">${log.type}</span>
+                  </div>
+                  ${log.type === 'KELUAR' ? `
+                    <button class="text-slate-500 hover:text-rose-400 transition-colors btn-delete-history p-1.5" data-id="${log.id}" data-info="${log.barangName} (${log.qty})">
+                      <i class="fa-solid fa-trash-can text-xs"></i>
+                    </button>
+                  ` : ''}
+                </div>
+              </td>
             </tr>
           `;
         }).join('');
+
+        // Tambahan Event Listener untuk menangani klik tombol tong sampah pada riwayat Stock Out
+        document.querySelectorAll('.btn-delete-history').forEach(btn => {
+          btn.addEventListener('click', function() {
+            const logId = this.getAttribute('data-id');
+            const logInfo = this.getAttribute('data-info');
+
+            Swal.fire({
+              title: 'Batalkan Stock Out?',
+              text: `Menghapus log "${logInfo}" akan mengembalikan jumlah stok barang tersebut ke dashboard secara otomatis.`,
+              icon: 'warning',
+              showCancelButton: true,
+              background: '#1e293b',
+              confirmButtonColor: '#f43f5e',
+              cancelButtonColor: '#475569',
+              confirmButtonText: 'Ya, Hapus Log!',
+              cancelButtonText: 'Batal'
+            }).then(async (result) => {
+              if (result.isConfirmed) {
+                Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
+                
+                // --- CONSOLE LOG DEBUGGING ---
+                console.log("[DEBUG DELETE] Mencoba menghapus log ID:", logId);
+                console.log("[DEBUG DELETE] Info baris yang dihapus:", logInfo);
+
+                // Eksekusi penghapusan baris di tabel barang_keluar Supabase
+                const { data, error, status } = await supabase
+                  .from('barang_keluar')
+                  .delete()
+                  .eq('id', logId)
+                  .select(); // Menggunakan .select() untuk memastikan data benar-benar terhapus dan mengembalikan barisnya
+
+                Swal.close();
+
+                // --- CONSOLE LOG HASIL RESPONS ---
+                console.log("[DEBUG DELETE] Status HTTP Code dari Supabase:", status);
+                console.log("[DEBUG DELETE] Data yang berhasil dihapus:", data);
+                console.log("[DEBUG DELETE] Objek Error dari Supabase:", error);
+
+                if (error) {
+                  console.error("[DEBUG DELETE ERROR] Detal Kegagalan:", error);
+                  Swal.fire({ icon: 'error', title: 'Gagal', text: error.message });
+                } else if (!data || data.length === 0) {
+                  // Kondisi jika status OK (200) tapi tidak ada data yang terhapus (karena RLS memblokir aksi DELETE)
+                  console.warn("[DEBUG DELETE WARNING] Perintah sukses dijalankan tapi 0 baris terhapus. Cek RLS Policy DELETE Anda di Supabase!");
+                  Swal.fire({ 
+                    icon: 'warning', 
+                    title: 'Penghapusan Tertahan', 
+                    text: 'Sistem mendeteksi data gagal dihapus dari database. Pastikan Role Anda memiliki hak akses (Policy DELETE) di tabel barang_keluar.',
+                    confirmButtonColor: '#f59e0b'
+                  });
+                } else {
+                  console.log("[DEBUG DELETE SUCCESS] Data sukses terhapus dari server database.");
+                  Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Log berhasil dihapus dan stok fisik dikembalikan.', timer: 1500, showConfirmButton: false });
+                  compileAndRenderLogs();
+                }
+              }
+            });
+          });
+        });
       }
 
       // Filter Event Listeners menggunakan SweetAlert2
